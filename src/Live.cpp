@@ -1,10 +1,12 @@
 #include "Live.h"
 
+#include <cstring>
 #include <mutex>
 
 #include <Windows.h>
 #include <mmsystem.h>
 
+#include "Share.h"
 #include "unofficial_extras/Definitions.h"
 
 namespace Live
@@ -57,7 +59,14 @@ namespace Live
 	{
 		if (aMessage == nullptr || aMessage->AccountName == nullptr || aMessage->Text == nullptr) { return; }
 		std::string account = aMessage->AccountName;
-		std::string text(aMessage->Text, static_cast<size_t>(aMessage->TextLength));
+		// The text is null terminated, so its real length is measured rather than taken on trust: a wrong
+		// TextLength would otherwise read past the end of somebody else's buffer.
+		size_t length = ::strnlen(aMessage->Text, Rezz::Share::kMaxTextChars);
+		if (aMessage->TextLength > 0 && static_cast<size_t>(aMessage->TextLength) < length)
+		{
+			length = static_cast<size_t>(aMessage->TextLength);
+		}
+		std::string text(aMessage->Text, length);
 		uint32_t now = timeGetTime();
 		std::scoped_lock lock(s_Mutex);
 		s_Session.OnChatMessage(account, text, now);

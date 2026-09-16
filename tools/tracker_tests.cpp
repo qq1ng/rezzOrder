@@ -692,6 +692,40 @@ namespace
 		CHECK(Rezz::Share::Resolve(typed.Entries, roster).Precast == std::vector<std::string>({ ":murako.9143" }));
 	}
 
+	// A squad message is typed by somebody else, so parsing has to hold up against a line built to be
+	// awkward rather than a line meant to be read.
+	void TestShareIgnoresAbusiveLines()
+	{
+		std::vector<Rezz::RosterMember> roster = { Who(":Gorath.5076", "Gorath"), Who(":murako.9143", "murako") };
+
+		// Percent signs and braces are just characters: names are never used as a format string.
+		Rezz::Share::Message formats = Rezz::Share::Parse("!rezzorder %s%n%p > {0} > %99999d");
+		CHECK(formats.What == Rezz::Share::Kind::Order);
+		CHECK(Rezz::Share::Resolve(formats.Entries, roster).Accounts.empty());
+
+		// A very long list stops at the cap instead of matching every name against the whole squad.
+		std::string many = "!rezzorder x";
+		for (int i = 0; i < 500; i++) { many += " > x"; }
+		Rezz::Share::Message flood = Rezz::Share::Parse(many);
+		CHECK(flood.Entries.size() <= Rezz::Share::kMaxEntries);
+
+		// One enormous name is cut down before it is matched or stored.
+		Rezz::Share::Message huge = Rezz::Share::Parse("!rezzorder " + std::string(5000, 'a'));
+		CHECK(huge.Entries.size() == 1);
+		CHECK(huge.Entries[0].Name.size() <= Rezz::Share::kMaxNameChars);
+
+		// Separators and stars on their own name nobody, so whatever they parse into matches no squad member.
+		Rezz::Share::Message punctuation = Rezz::Share::Parse("!rezzorder >>>,,,***");
+		CHECK(Rezz::Share::Resolve(punctuation.Entries, roster).Accounts.empty());
+		CHECK(Rezz::Share::Parse("!rezzorder    ").What == Rezz::Share::Kind::Request);
+
+		// Whatever the line says, an order can only ever name people who are really in the squad.
+		Rezz::Share::Message fake = Rezz::Share::Parse("!rezzorder Gorath > NotInSquad > Gorath > murako");
+		Rezz::Share::Resolved resolved = Rezz::Share::Resolve(fake.Entries, roster);
+		CHECK(resolved.Accounts == std::vector<std::string>({ ":Gorath.5076", ":murako.9143" }));
+		CHECK(resolved.Unknown.size() == 2); // the unknown name, and Gorath the second time
+	}
+
 	// The whole path: somebody shares an order with a precast player and our session takes both over.
 	void TestSharedPrecastReachesTheSession()
 	{
@@ -967,6 +1001,7 @@ int main()
 		{ "share round trips every squad", TestShareRoundTripsEverySquad },
 		{ "share keeps everyone when it can", TestShareKeepsEveryoneWhenItCan },
 		{ "share carries precast", TestShareCarriesPrecast },
+		{ "share ignores abusive lines", TestShareIgnoresAbusiveLines },
 		{ "shared precast reaches the session", TestSharedPrecastReachesTheSession },
 		{ "share parses what people type", TestShareParsesWhatPeopleType },
 		{ "share resolves against the squad", TestShareResolvesAgainstTheSquad },

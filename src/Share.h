@@ -29,6 +29,14 @@ namespace Rezz::Share
 	inline constexpr const char* kRequestText = "?rezzorder";
 	inline constexpr char kPrecastMark = '*';
 
+	// A squad message is whatever another player typed, so parsing is bounded rather than trusting it to be
+	// sensible. Matching each name against the roster costs squad-size work, so an unbounded list of names
+	// would let one chat line do a lot of pointless work on every client that reads it. A real order never
+	// comes close to these: the game's own chat limit is 199 characters, and a squad holds 50 players.
+	inline constexpr size_t kMaxEntries   = 60;  // names read from one line; the rest are ignored
+	inline constexpr size_t kMaxNameChars = 64;  // one name; longer is truncated before matching
+	inline constexpr size_t kMaxTextChars = 1024; // a whole line, in case the sender's length is wrong
+
 	// The chat line for this order, or empty when the order is empty. aPrecast holds the accounts that may
 	// fire early.
 	std::string Encode(const std::vector<std::string>& aOrder, const std::vector<std::string>& aPrecast,

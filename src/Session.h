@@ -104,6 +104,8 @@ namespace Rezz
 		static constexpr uint64_t kOutOfRangeMs = 15 * 1000;
 		// A request for the order that nobody answered stops asking after this long.
 		static constexpr uint64_t kRequestShowMs = 60 * 1000;
+		// How soon the same person asking again is announced again, rather than only refreshing the window.
+		static constexpr uint64_t kAskAgainMs = 30 * 1000;
 
 		// Squad channel combat event. aNowMs is the arrival time (timeGetTime), used only for roster timing;
 		// the tracker works in event time.
@@ -190,6 +192,10 @@ namespace Rezz
 		bool                                          m_HasShare        = false;
 		std::string                                   m_RequestFrom;
 		uint64_t                                      m_RequestAtMs     = 0;
+		// Who we last told the player about, so one person typing "?rezzorder" over and over cannot fill the
+		// window with notices. Their question still refreshes, it just stops being announced again.
+		std::string                                   m_AskedNoticeFrom;
+		uint64_t                                      m_AskedNoticeMs   = 0;
 		std::string                                   m_OrderFrom;   // empty: we built this order ourselves
 		std::vector<std::string>                      m_Precast;
 		AnswerRule                                    m_AnswerRule   = AnswerRule::WhenOrderIsOurs;

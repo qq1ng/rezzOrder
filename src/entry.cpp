@@ -1,5 +1,7 @@
+#include <atomic>
 #include <cstring>
 #include <filesystem>
+#include <stdexcept>
 
 #include <Windows.h>
 
@@ -64,27 +66,76 @@ namespace
 	uint32_t          s_WvwSinceMs = 0; // render thread: when we last entered a WvW map (0 = not in WvW)
 	bool              s_NoDataAlerted = false;
 
-	void OnCombatSquad(void* aArgs)
+	// Everything below is called from Nexus, from arcdps or from the game's window procedure. All three are C
+	// boundaries, so an exception that escapes one ends the process: the player loses the game, not just this
+	// addon. Nothing here is worth that, so every callback catches.
+	//
+	// The same guard keeps the addon alive for the length of a call. Nexus can unload an addon at runtime (an
+	// update does exactly that) and arcdps states its combat callback "may be called asynchronously", so a
+	// callback can still be running while Unload tears its state down. Counting calls in flight lets Unload
+	// wait for them instead.
+	std::atomic<bool> s_Alive{false};
+	std::atomic<int>  s_InFlight{0};
+	std::atomic<int>  s_Failures{0};
+
+	void LogFailure(const char* aWhat, const char* aDetail)
 	{
-		auto* data = static_cast<ArcDps::EvCombatData*>(aArgs);
-		Live::OnCombatSquad(data);
-		Capture::OnCombat(Capture::CH_SQUAD, data);
+		// One line per callback kind is enough to find the cause; a throw that repeats every frame must not
+		// turn into its own problem.
+		if (s_Failures.fetch_add(1) >= 20 || s_Api == nullptr) { return; }
+		std::string message = std::string("Caught an exception in ") + aWhat + ": " + aDetail;
+		s_Api->Log(LOGL_WARNING, ADDON_NAME, message.c_str());
 	}
 
-	void OnCombatLocal(void* aArgs) { Capture::OnCombat(Capture::CH_LOCAL, static_cast<ArcDps::EvCombatData*>(aArgs)); }
+	template <typename F>
+	void Guarded(const char* aWhat, F&& aFunction)
+	{
+		// Counted before the check, so Unload either waits for this call or sees the addon already closed.
+		s_InFlight.fetch_add(1);
+		if (s_Alive.load())
+		{
+			try                             { aFunction(); }
+			catch (const std::exception& e) { LogFailure(aWhat, e.what()); }
+			catch (...)                     { LogFailure(aWhat, "unknown exception"); }
+		}
+		s_InFlight.fetch_sub(1);
+	}
+
+	void StartRecording();
+
+	void OnCombatSquad(void* aArgs)
+	{
+		Guarded("the squad combat event", [aArgs]
+		{
+			auto* data = static_cast<ArcDps::EvCombatData*>(aArgs);
+			Live::OnCombatSquad(data);
+			Capture::OnCombat(Capture::CH_SQUAD, data);
+		});
+	}
+
+	void OnCombatLocal(void* aArgs)
+	{
+		Guarded("the local combat event", [aArgs]
+		{
+			Capture::OnCombat(Capture::CH_LOCAL, static_cast<ArcDps::EvCombatData*>(aArgs));
+		});
+	}
 
 	void OnAgent(const char* aName, void* aArgs)
 	{
-		auto* update = static_cast<ArcDps::EvAgentUpdate*>(aArgs);
-		Live::OnAgentUpdate(update);
-		Capture::OnAgentUpdate(aName, update);
+		Guarded(aName, [aName, aArgs]
+		{
+			auto* update = static_cast<ArcDps::EvAgentUpdate*>(aArgs);
+			Live::OnAgentUpdate(update);
+			Capture::OnAgentUpdate(aName, update);
+		});
 	}
 
 	void OnSelfJoin(void* aArgs)    { OnAgent("SELF_JOIN", aArgs); }
 	void OnSelfLeave(void* aArgs)
 	{
 		// Swapping character or hopping maps: the fake squad would outlive what it was started for.
-		Rezz::Demo::Stop();
+		Guarded("SELF_LEAVE", [] { Rezz::Demo::Stop(); });
 		OnAgent("SELF_LEAVE", aArgs);
 	}
 	void OnSquadJoin(void* aArgs)   { OnAgent("SQUAD_JOIN", aArgs); }
@@ -92,38 +143,51 @@ namespace
 
 	void OnUeSquadUpdate(void* aArgs)
 	{
-		if (auto* update = static_cast<SquadUpdate*>(aArgs))
+		Guarded("the squad update", [aArgs]
 		{
-			Live::OnSquadUpdate(update->Users, update->Count);
-			Capture::OnSquadUpdate(update->Users, update->Count);
-		}
+			if (auto* update = static_cast<SquadUpdate*>(aArgs))
+			{
+				Live::OnSquadUpdate(update->Users, update->Count);
+				Capture::OnSquadUpdate(update->Users, update->Count);
+			}
+		});
 	}
 
 	void OnUeChatMessage(void* aArgs)
 	{
-		auto* message = static_cast<SquadMessageInfo*>(aArgs);
-		Live::OnChatMessage(message);
-		Capture::OnChatMessage(message);
+		Guarded("the chat message", [aArgs]
+		{
+			auto* message = static_cast<SquadMessageInfo*>(aArgs);
+			Live::OnChatMessage(message);
+			Capture::OnChatMessage(message);
+		});
 	}
 
 	UINT OnWndProc(HWND, UINT aMsg, WPARAM aWParam, LPARAM aLParam)
 	{
-		if (aMsg == WM_KEYDOWN || aMsg == WM_SYSKEYDOWN || aMsg == WM_XBUTTONDOWN || aMsg == WM_MBUTTONDOWN)
+		Guarded("the window procedure", [aMsg, aWParam, aLParam]
 		{
-			bool typing = Ui::TextInputActive || OrderUi::TextInputActive || (s_Mumble && s_Mumble->Context.IsTextboxFocused);
-			Capture::OnKey(aMsg, aWParam, aLParam, typing);
-		}
-		return aMsg; // never consume input
+			if (aMsg == WM_KEYDOWN || aMsg == WM_SYSKEYDOWN || aMsg == WM_XBUTTONDOWN || aMsg == WM_MBUTTONDOWN)
+			{
+				bool typing = Ui::TextInputActive || OrderUi::TextInputActive ||
+					(s_Mumble && s_Mumble->Context.IsTextboxFocused);
+				Capture::OnKey(aMsg, aWParam, aLParam, typing);
+			}
+		});
+		return aMsg; // never consume input, whatever happened above
 	}
 
 	void OnInputBind(const char* aIdentifier, bool aIsRelease)
 	{
-		if (aIsRelease) { return; }
-		if (std::strcmp(aIdentifier, KB_TOGGLE) == 0) { Ui::ToggleRequested = true; }
-		else if (std::strcmp(aIdentifier, KB_MARK) == 0) { Ui::MarkRequested = true; }
-		else if (std::strcmp(aIdentifier, KB_EDITOR) == 0) { OrderUi::EditorToggleRequested = true; }
-		else if (std::strcmp(aIdentifier, KB_LOCK) == 0) { OrderUi::LockToggleRequested = true; }
-		else if (std::strcmp(aIdentifier, KB_COPY) == 0) { OrderUi::CopyOrderRequested = true; }
+		Guarded("the input bind", [aIdentifier, aIsRelease]
+		{
+			if (aIsRelease) { return; }
+			if (std::strcmp(aIdentifier, KB_TOGGLE) == 0) { Ui::ToggleRequested = true; }
+			else if (std::strcmp(aIdentifier, KB_MARK) == 0) { Ui::MarkRequested = true; }
+			else if (std::strcmp(aIdentifier, KB_EDITOR) == 0) { OrderUi::EditorToggleRequested = true; }
+			else if (std::strcmp(aIdentifier, KB_LOCK) == 0) { OrderUi::LockToggleRequested = true; }
+			else if (std::strcmp(aIdentifier, KB_COPY) == 0) { OrderUi::CopyOrderRequested = true; }
+		});
 	}
 
 	// Every message shows in the turn window; these are the ones worth putting across the screen as well.
@@ -186,7 +250,7 @@ namespace
 		}
 	}
 
-	void OnRender()
+	void RenderFrame()
 	{
 		uint32_t now = timeGetTime();
 		if (s_Mumble && s_Mumble->Context.MapID != s_LastMapId)
@@ -227,20 +291,53 @@ namespace
 		Ui::Render(gameplay);
 	}
 
+	// If a draw ever throws part way through a window, ImGui's stack is left unbalanced, which is bad. It is
+	// still better than letting the exception reach Nexus, which would take the game down with it.
+	void OnRender() { Guarded("the render callback", [] { RenderFrame(); }); }
+
 	void OnOptions()
 	{
+		Guarded("the options page", []
+		{
 		OrderUi::Options();
 		ImGui::Separator();
 		if (ImGui::CollapsingHeader("Field recorder (testing)"))
 		{
+			bool record = Settings::Current.RecordFieldLogs;
+			if (ImGui::Checkbox("Record a field log while in WvW", &record))
+			{
+				Settings::Current.RecordFieldLogs = record;
+				Settings::MarkDirty();
+				if (record) { StartRecording(); } else { Capture::Stop(); }
+			}
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip("%s", "Writes a CSV of combat events to the addon's logs folder, for working "
+					"out why tracking went wrong. It includes the account and character names of everyone in "
+					"your squad, so leave it off unless you mean to send one in.");
+			}
 			Ui::Options();
 		}
+		});
 	}
 
 	void OnQuickAccessMenu()
 	{
-		if (ImGui::Button("Rezz Order editor")) { OrderUi::ShowEditor = true; }
-		if (ImGui::Button("Copy order for squad chat")) { OrderUi::CopyOrderRequested = true; }
+		Guarded("the quick access menu", []
+		{
+			if (ImGui::Button("Rezz Order editor")) { OrderUi::ShowEditor = true; }
+			if (ImGui::Button("Copy order for squad chat")) { OrderUi::CopyOrderRequested = true; }
+		});
+	}
+
+	// Split out so the options page can start and stop recording without a reload.
+	void StartRecording()
+	{
+		std::filesystem::path addonDir = s_Api->Paths_GetAddonDirectory("RezzOrder");
+		if (!Capture::Start(addonDir / "logs", ADDON_VERSION_STRING))
+		{
+			s_Api->Log(LOGL_WARNING, ADDON_NAME, "Could not create the log file; nothing will be recorded.");
+		}
 	}
 
 	void AddonLoad(AddonAPI_t* aApi)
@@ -261,11 +358,13 @@ namespace
 		Fonts::Init(s_Api, s_NexusLink);
 		OrderUi::Init();
 
-		// The field recorder keeps running on WvW maps while the order features are being tested.
-		if (!Capture::Start(addonDir / "logs", ADDON_VERSION_STRING))
-		{
-			s_Api->Log(LOGL_WARNING, ADDON_NAME, "Could not create the log file; nothing will be recorded.");
-		}
+		// The field recorder exists to gather test data, and what it writes includes the account and character
+		// names of everyone in the squad. That is not something to do on a player's machine unless they asked
+		// for it, so it stays off until somebody turns it on in the options.
+		if (Settings::Current.RecordFieldLogs) { StartRecording(); }
+
+		// Live from here: callbacks may arrive on other threads the moment they are subscribed.
+		s_Alive = true;
 
 		s_Api->Events_Subscribe(EV_COMBAT_SQUAD, OnCombatSquad);
 		s_Api->Events_Subscribe(EV_COMBAT_LOCAL, OnCombatLocal);
@@ -299,6 +398,11 @@ namespace
 
 	void AddonUnload()
 	{
+		// Stop accepting work first, then wait for calls already inside a callback. Without this, a combat
+		// event arriving on another thread could still be walking state that the lines below are destroying.
+		s_Alive = false;
+		for (int spins = 0; s_InFlight.load() > 0 && spins < 1000; spins++) { ::Sleep(1); }
+
 		s_Api->QuickAccess_RemoveContextMenu(QA_MENU_ITEM);
 		s_Api->GUI_DeregisterCloseOnEscape(OrderUi::kEditorName);
 		s_Api->GUI_DeregisterCloseOnEscape(Ui::kWindowName);

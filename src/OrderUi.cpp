@@ -1430,7 +1430,7 @@ namespace OrderUi
 			ImGui::SetNextWindowBgAlpha(s.OverlayBgAlpha);
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, s.OverlayLocked && !interactive ? 0.0f : 1.0f);
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6, 5));
-			bool open = ImGui::Begin(s.OverlayTitleBar ? "Rezz Order###overlay" : "###overlay", nullptr, flags);
+			bool open = ImGui::Begin(s.OverlayTitleBar ? "Rezz Order###rezzorder_overlay" : "###rezzorder_overlay", nullptr, flags);
 			ImGui::PopStyleVar(2);
 			if (!open) { ImGui::End(); ArcStyle::Pop(); return; }
 
@@ -1758,7 +1758,7 @@ namespace OrderUi
 			// turn window happens to sit in a corner.
 			ImVec2 screen = ImGui::GetIO().DisplaySize;
 			ImGui::SetNextWindowPos(ImVec2(screen.x * 0.5f, screen.y * 0.35f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-			if (ImGui::Begin("Revive order shared###share", nullptr, ImGuiWindowFlags_AlwaysAutoResize |
+			if (ImGui::Begin("Revive order shared###rezzorder_share", nullptr, ImGuiWindowFlags_AlwaysAutoResize |
 				ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings))
 			{
 				const Rezz::RosterMember* sender = Find(aRoster, aView.Share.From);
@@ -1825,7 +1825,7 @@ namespace OrderUi
 			ImGui::SetNextWindowSize(ImVec2(0, 0), ImGuiCond_Always);
 			ImVec2 screen = ImGui::GetIO().DisplaySize;
 			ImGui::SetNextWindowPos(ImVec2(screen.x * 0.5f, screen.y * 0.35f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-			if (ImGui::Begin("Revive order asked for###request", nullptr, ImGuiWindowFlags_AlwaysAutoResize |
+			if (ImGui::Begin("Revive order asked for###rezzorder_request", nullptr, ImGuiWindowFlags_AlwaysAutoResize |
 				ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings))
 			{
 				const Rezz::RosterMember* asker = Find(aRoster, aView.RequestFrom);

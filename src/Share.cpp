@@ -99,7 +99,8 @@ namespace Rezz::Share
 	Message Parse(const std::string& aText)
 	{
 		Message message;
-		std::string text = Trim(aText);
+		// Cut the line to a sane size first: everything below walks it, and it comes from another player.
+		std::string text = Trim(aText.size() > kMaxTextChars ? aText.substr(0, kMaxTextChars) : aText);
 		std::string lower = Lower(text);
 
 		// "?rezzorder" asks; "!rezzorder ..." tells.
@@ -128,8 +129,11 @@ namespace Rezz::Share
 					name = Trim(name);
 				}
 				if (name.empty()) { continue; }
+				if (name.size() > kMaxNameChars) { name.resize(kMaxNameChars); }
 				entry.Name = name;
 				message.Entries.push_back(entry);
+				// Past this many names the line is not a real order, so stop reading it.
+				if (message.Entries.size() >= kMaxEntries) { break; }
 				continue;
 			}
 			token += character;

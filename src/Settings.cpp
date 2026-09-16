@@ -127,6 +127,7 @@ namespace Settings
 			else if (key == "backup_flash_color") { ParseColor(value, values.BackupFlashColor); }
 			else if (key == "last_seen_version") { values.LastSeenVersion = value; }
 			else if (key == "editor_all_professions") { values.EditorAllProfessions = ParseBool(value); }
+			else if (key == "record_field_logs") { values.RecordFieldLogs = ParseBool(value); }
 		}
 		Current = values;
 	}
@@ -199,6 +200,7 @@ namespace Settings
 			out << "backup_flash_color=" << WriteColor(v.BackupFlashColor) << "\n";
 			out << "last_seen_version=" << v.LastSeenVersion << "\n";
 			out << "editor_all_professions=" << v.EditorAllProfessions << "\n";
+			out << "record_field_logs=" << v.RecordFieldLogs << "\n";
 		}
 		std::filesystem::rename(temp, s_File, ec);
 	}

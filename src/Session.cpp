@@ -23,6 +23,21 @@ namespace Rezz
 			std::transform(aText.begin(), aText.end(), aText.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 			return aText;
 		}
+
+		// Same ordering as comparing two Lower() copies, without building them. The roster is sorted on every
+		// frame the overlay draws, so a comparator that allocates twice per comparison is a few hundred
+		// allocations a frame, and it holds the session lock while the arcdps thread is waiting for it.
+		bool LessNoCase(const std::string& aLeft, const std::string& aRight)
+		{
+			size_t shared = std::min(aLeft.size(), aRight.size());
+			for (size_t i = 0; i < shared; i++)
+			{
+				unsigned char left = static_cast<unsigned char>(std::tolower(static_cast<unsigned char>(aLeft[i])));
+				unsigned char right = static_cast<unsigned char>(std::tolower(static_cast<unsigned char>(aRight[i])));
+				if (left != right) { return left < right; }
+			}
+			return aLeft.size() < aRight.size();
+		}
 	}
 
 	bool IsReviveProfession(uint32_t aProfession)
@@ -430,9 +445,15 @@ namespace Rezz
 			// Someone joined late and asked. Only a client that has an order can answer.
 			// Only a client that has an order can answer one.
 			if (m_Tracker.Order().empty()) { return; }
+			bool repeat = aAccount == m_AskedNoticeFrom && aNowMs < m_AskedNoticeMs + kAskAgainMs;
 			m_RequestFrom = aAccount;
 			m_RequestAtMs = aNowMs;
-			Notify(NoticeKind::ShareRequested, aAccount, name + " asked for the revive order");
+			if (!repeat)
+			{
+				m_AskedNoticeFrom = aAccount;
+				m_AskedNoticeMs = aNowMs;
+				Notify(NoticeKind::ShareRequested, aAccount, name + " asked for the revive order");
+			}
 			return;
 		}
 
@@ -524,7 +545,7 @@ namespace Rezz
 		{
 			bool aRevive = IsReviveProfession(a.Profession), bRevive = IsReviveProfession(b.Profession);
 			if (aRevive != bRevive) { return aRevive; }
-			return Lower(a.Account) < Lower(b.Account);
+			return LessNoCase(a.Account, b.Account);
 		});
 		return view;
 	}

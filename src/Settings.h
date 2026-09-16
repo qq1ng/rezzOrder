@@ -75,6 +75,9 @@ namespace Settings
 
 		std::string LastSeenVersion;            // the "all set" alert is for the first run of a new build
 		bool  EditorAllProfessions = false;     // editor lists professions without a revive skill too
+		// The field recorder writes squad members' account and character names to a CSV. It exists to collect
+		// test data, so it is off unless somebody deliberately turns it on.
+		bool  RecordFieldLogs = false;
 	};
 
 	extern Values Current;
