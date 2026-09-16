@@ -24,6 +24,7 @@ namespace OrderUi
 	FrameInfo         LastEditorFrame;
 	FrameInfo         LastShareFrame;
 	FrameInfo         LastRequestFrame;
+	int               ShotMenu = -1;
 	std::atomic<bool> TextInputActive{false};
 	std::atomic<bool> EditorToggleRequested{false};
 	std::atomic<bool> LockToggleRequested{false};
@@ -496,9 +497,29 @@ namespace OrderUi
 			ImGui::EndMenu();
 		}
 
+		// In game a menu opens under the cursor. The harness has no cursor, so for a screenshot it is put
+		// beside the window instead of on top of the rows it is meant to illustrate.
+		void PlaceMenuForShot()
+		{
+			if (ShotMenu == -1) { return; }
+			ImVec2 pos = ImGui::GetWindowPos();
+			ImGui::SetNextWindowPos(ImVec2(pos.x + ImGui::GetWindowSize().x + 8.0f, pos.y));
+		}
+
+		// Where an open menu landed, so a screenshot can take in the window and its menu together.
+		void NoteMenuRect()
+		{
+			LastFrame.MenuX = ImGui::GetWindowPos().x;
+			LastFrame.MenuY = ImGui::GetWindowPos().y;
+			LastFrame.MenuWidth = ImGui::GetWindowSize().x;
+			LastFrame.MenuHeight = ImGui::GetWindowSize().y;
+		}
+
 		bool OverlayContextMenu(const Rezz::SessionView& aView)
 		{
+			if (ShotMenu == -2) { ImGui::OpenPopup("overlay_menu"); PlaceMenuForShot(); }
 			if (!ImGui::BeginPopupContextWindow("overlay_menu")) { return false; }
+			NoteMenuRect();
 			AddMeItem(aView);
 			AddPlayerMenu(aView);
 			PresetMenu(aView);
@@ -678,6 +699,7 @@ namespace OrderUi
 		void RowMenu(Frame& aFrame, int aIndex)
 		{
 			if (!ImGui::BeginPopupContextItem("row_menu")) { return; }
+			NoteMenuRect();
 			aFrame.MenuOpen = true;
 			const Rezz::SessionView& view = *aFrame.View;
 			ImGui::TextColored(kGrey, "%s", aFrame.Names[aIndex].c_str());
@@ -710,6 +732,7 @@ namespace OrderUi
 		void RowInteraction(Frame& aFrame, int aIndex, const ImVec2& aSize)
 		{
 			if (!aFrame.Interactive) { return; }
+			if (ShotMenu == aIndex) { ImGui::OpenPopup("row_menu"); PlaceMenuForShot(); }
 			ImVec2 rowPos = ImGui::GetCursorPos();
 			ImGui::InvisibleButton("row", aSize);
 			if (aFrame.EditMode && ImGui::BeginDragDropSource())

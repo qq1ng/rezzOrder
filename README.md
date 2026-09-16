@@ -6,8 +6,6 @@ same downed player.
 
 ![What it does](docs/images/banner.gif)
 
-*A 16 second tour. [The same thing as H.264](docs/images/banner.mp4) if you want it sharp: GitHub strips
-video elements out of a README, so the animation here has to be a GIF.*
 
 ## Install
 
@@ -32,6 +30,8 @@ video elements out of a README, so the animation here has to be a GIF.*
 **Right-click the turn window.** That menu is all you need most times: *Add me*, *Add player* to pick
 somebody out of the squad, *Remove player*, a nickname, and your
 saved orders. Right-click a player for options specific to them.
+
+![The right-click menus](docs/images/menus.png)
 
 For setting a whole squad up at once more easily, press **Ctrl+Shift+O** for the order editor. The left column is the
 squad, the right column is the order: `+` adds someone, dragging a player moves them in the order. Only professions with an
@@ -123,7 +123,7 @@ cd rezzOrder
 .\scripts\check.ps1           # build, unit tests, UI renders
 ```
 
-## How it works, and how it is tested
+## How it works & how to test
 
 Squad combat events reach addons about **2.6 seconds late**. That is ArcDPS by design, not a fault here, and
 it is why cooldowns are measured from the time a cast really happened rather than from when the event

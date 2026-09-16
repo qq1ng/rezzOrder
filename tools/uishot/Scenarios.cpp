@@ -249,6 +249,11 @@ namespace Shots
 					view.Precast = { Account(1), Account(4) };
 					return view;
 				} });
+			// The menus, for the README: everything an order needs can be done from them.
+			list.push_back({ "menu-window", "right-click the window: add, remove, saved orders, share, style",
+				[](Settings::Values& s) { Layout(s, L::Compact); }, Mixed, Scenario::Window::Overlay, -2 });
+			list.push_back({ "menu-player", "right-click a player for what applies to them",
+				[](Settings::Values& s) { Layout(s, L::Compact); }, Mixed, Scenario::Window::Overlay, 1 });
 			list.push_back({ "compact-empty", "no order yet: the window still shows",
 				[](Settings::Values& s) { Layout(s, L::Compact); }, Empty });
 			list.push_back({ "compact-only-us", "an order with just us in it",

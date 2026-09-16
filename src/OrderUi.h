@@ -27,6 +27,8 @@ namespace OrderUi
 		std::string              Banner;  // the top line, e.g. "YOUR TURN" or "Up: Gorath"
 		std::vector<std::string> Rows;    // "4. UP Gorath ready", in drawing order
 		float                    X = 0, Y = 0, Width = 0, Height = 0;
+		// An open menu, which is its own window and sits outside the one above. Zero when none is open.
+		float                    MenuX = 0, MenuY = 0, MenuWidth = 0, MenuHeight = 0;
 		bool                     Drawn = false;
 	};
 
@@ -34,6 +36,10 @@ namespace OrderUi
 	extern FrameInfo LastEditorFrame; // the same for the order editor window
 	extern FrameInfo LastShareFrame;  // ... and for the "somebody shared an order" prompt
 	extern FrameInfo LastRequestFrame; // ... and for the "somebody asked for the order" prompt
+
+	// Opens a menu by itself so the render harness can photograph it: -1 nothing, -2 the window menu,
+	// 0 and up the row menu of that row. Render thread only, and never set while the game is running.
+	extern int ShotMenu;
 
 	struct Context
 	{

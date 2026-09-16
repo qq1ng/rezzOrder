@@ -30,6 +30,8 @@ namespace Shots
 		// Screen: the whole canvas, for things drawn outside any window (the edge flash).
 		enum class Window : uint8_t { Overlay, Editor, Share, Request, Screen };
 		Window      Shows = Window::Overlay;
+		// A menu to open for the shot: -1 none, -2 the window menu, 0 and up a row's menu.
+		int         Menu = -1;
 	};
 
 	// Every scenario the harness knows, in the order they are rendered.

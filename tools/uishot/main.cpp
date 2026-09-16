@@ -280,6 +280,7 @@ int main(int argc, char** argv)
 		// Demo mode is per-scenario state: only the scenarios that ask for it run with it.
 		Rezz::Demo::Stop();
 		Notify::Reset(); // each scenario is its own moment: no signal carries over
+		OrderUi::ShotMenu = scenario.Menu;
 		Rezz::SessionView view = scenario.Build();
 		Settings::Current.Order = view.Order;
 		Host::SetView(view);
@@ -310,14 +311,32 @@ int main(int argc, char** argv)
 			continue;
 		}
 		const int margin = 24;
-		int x = static_cast<int>(info.X) - margin;
-		int y = static_cast<int>(info.Y) - margin;
-		int width = static_cast<int>(info.Width) + margin * 2;
-		int height = static_cast<int>(info.Height) + margin * 2;
+		float left = info.X, top = info.Y;
+		float right = info.X + info.Width, bottom = info.Y + info.Height;
+		if (info.MenuWidth > 0.0f)
+		{
+			// An open menu is its own window beside the one it belongs to: the shot has to hold both.
+			left = std::min(left, info.MenuX);
+			top = std::min(top, info.MenuY);
+			right = std::max(right, info.MenuX + info.MenuWidth);
+			bottom = std::max(bottom, info.MenuY + info.MenuHeight);
+		}
+		int x = static_cast<int>(left) - margin;
+		int y = static_cast<int>(top) - margin;
+		int width = static_cast<int>(right - left) + margin * 2;
+		int height = static_cast<int>(bottom - top) + margin * 2;
 		if (scenario.Shows == Shots::Scenario::Window::Overlay) { failures += Validate(scenario, view, info); }
 
 		std::string file = outDir + "/" + scenario.Name + ".png";
-		if (!SavePng(Widen(file), x, y, width, height))
+		// Windows hands a just-written PNG to its thumbnailer and indexer, which briefly hold it open; a
+		// retry turns that into a pause instead of a failed run.
+		bool saved = false;
+		for (int attempt = 0; attempt < 3 && !saved; attempt++)
+		{
+			if (attempt > 0) { Sleep(150); }
+			saved = SavePng(Widen(file), x, y, width, height);
+		}
+		if (!saved)
 		{
 			std::printf("FAILED %s: could not write %s\n", scenario.Name.c_str(), file.c_str());
 			failures++;

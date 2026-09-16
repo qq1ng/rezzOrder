@@ -64,6 +64,29 @@ def sheet(rows, out_name, title):
     return SHOTS / out_name
 
 
+def menus():
+    """The two right-click menus side by side, for the README's "build an order" section."""
+    panels = [("right-click the window", "menu-window"), ("right-click a player", "menu-player")]
+    images = [(label, Image.open(SHOTS / f"{name}.png").convert("RGB")) for label, name in panels
+              if (SHOTS / f"{name}.png").exists()]
+    if len(images) < 2:
+        return None
+
+    pad, label_h = 14, 22
+    width = sum(image.width for _, image in images) + pad * (len(images) + 1)
+    height = max(image.height for _, image in images) + label_h + pad * 2
+    canvas = Image.new("RGB", (width, height), BG)
+    draw = ImageDraw.Draw(canvas)
+    x = pad
+    for label, image in images:
+        draw.text((x + 2, pad), label, font=font(13, True), fill=TEXT)
+        canvas.paste(image, (x, pad + label_h))
+        x += image.width + pad
+    out = ROOT / "docs" / "images" / "menus.png"
+    canvas.save(out)
+    return out
+
+
 def main():
     layouts = sheet(
         [
@@ -98,7 +121,7 @@ def main():
         "all-states.png",
         "Rezz Order - states and options",
     )
-    for path in (layouts, states):
+    for path in (layouts, states, menus()):
         if path:
             print(f"wrote {path.relative_to(ROOT)}")
 
