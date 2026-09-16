@@ -23,7 +23,7 @@
 #include <mmsystem.h>
 
 #define ADDON_NAME "Rezz Order"
-#define ADDON_VERSION_STRING "0.2.0-dev"
+#define ADDON_VERSION_STRING "0.2.0"
 
 namespace
 {

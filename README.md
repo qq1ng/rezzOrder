@@ -4,10 +4,10 @@ A Guild Wars 2 addon for WvW squads with a set revive tool order. It watches eve
 skills and shows whose turn it is, so two people don't burn an Illu and Spirit on the
 same downed player.
 
-<video src="https://cdn.jsdelivr.net/gh/qq1ng/rezzOrder@main/docs/images/banner.mp4"
-       autoplay loop muted playsinline width="640">
-  <img src="docs/images/banner.gif" alt="What it does" width="640">
-</video>
+![What it does](docs/images/banner.gif)
+
+*A 16 second tour. [The same thing as H.264](docs/images/banner.mp4) if you want it sharp: GitHub strips
+video elements out of a README, so the animation here has to be a GIF.*
 
 ## Install
 
