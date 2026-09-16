@@ -16,4 +16,6 @@ docs/mockups/
 
 __pycache__/
 *.pyc
-docs/roadmap.md
+
+# Working notes: phase write-ups, test plans, the roadmap. Kept on disk, not in the repo.
+notes/

@@ -11,7 +11,7 @@ namespace Rezz
 		constexpr uint64_t kStuckCastMs    = 10 * 1000; // a cast without a stop event is forgotten after this
 
 		// When an ally gets up relative to the recorded stop of the cast/effect that revived them (field data,
-		// docs/phase0-results.md sections 16 and 19): Illusion of Life at the stop, Battle Standard ~70 ms and
+		// notes/phase0-results.md sections 16 and 19): Illusion of Life at the stop, Battle Standard ~70 ms and
 		// spirit slams ~115 ms before it. Skills without field data get a symmetric window.
 		struct Window { int64_t From; int64_t Expected; int64_t To; };
 

@@ -3,7 +3,7 @@
 #include <cstdint>
 
 // Instant revive skills, WvW values. Sources: wiki.guildwars2.com raw pages, api.guildwars2.com and the
-// Phase 0 recordings (docs/phase0-results.md).
+// Phase 0 recordings (notes/phase0-results.md).
 
 // Skills that share one cooldown on a player's bar. Glyph attunement variants are one glyph; the ranger
 // spirit's slams are effects of the Spirit of Nature cast.
@@ -67,7 +67,7 @@ inline constexpr ReviveSkill kReviveSkills[] = {
 const ReviveSkill* FindReviveSkill(uint32_t aSkillId);
 const ReviveGroupInfo& GetGroupInfo(ReviveGroup aGroup);
 
-// Whether a stopped cast spent the skill. Rule from Phase 0 (docs/phase0-results.md: 0 contradictions over
+// Whether a stopped cast spent the skill. Rule from Phase 0 (notes/phase0-results.md: 0 contradictions over
 // ~430 casts, incl. quickness and slow): arcdps reports a full cast (stop reason RETURN_CONTROL), or the cast
 // ran for at least the base cast time. aBaseMs is cbtevent.buff_dmg on the stop event (speed-independent).
 bool CountsAsUsed(const ReviveSkill& aSkill, uint8_t aStopReason, int32_t aBaseMs);

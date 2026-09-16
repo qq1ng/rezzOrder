@@ -4,7 +4,9 @@ A Guild Wars 2 addon for WvW squads that agree on a revive order. It watches eve
 skills and shows whose turn it is, so two people don't burn a Battle Standard and a Signet of Mercy on the
 same downed commander.
 
-![What it does](docs/images/banner.gif)
+[![What it does: a 16 second tour](docs/images/banner-poster.png)](docs/images/banner.mp4)
+
+*(click for a 16 second tour)*
 
 ## Install
 
@@ -126,7 +128,7 @@ cd rezzOrder
 Squad combat events reach addons about **2.6 seconds late**. That is ArcDPS by design, not a fault here, and
 it is why cooldowns are measured from the time a cast really happened rather than from when the event
 arrived. A revive counts as spent when ArcDPS reports a full cast, or when the cast ran for at least its
-base cast time. That rule was checked against roughly 430 recorded casts (`docs/phase0-results.md`).
+base cast time. That rule was checked against roughly 430 casts recorded in the field.
 
 Two things run without starting the game:
 
@@ -139,7 +141,8 @@ Two things run without starting the game:
 
 `tools/replay.cpp` replays recorded ArcDPS logs through the same session code.
 
-`docs/phase3-layouts-and-sharing.md` describes the current state in detail.
+Some source comments point at write-ups under `notes/`: the measurement results, phase plans and the
+roadmap. Those are working notes rather than documentation, and they are not published with the repo.
 
 ## Licence
 

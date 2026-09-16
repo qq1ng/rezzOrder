@@ -13,7 +13,7 @@
 // (the only stable player identity). Times are arcdps event times (timeGetTime ms): cooldowns are
 // measured from when a cast really happened, not from when the ~2.65 s delayed notification arrived.
 //
-// Turn rules (decided with the squad lead, see docs/phase1-tracker.md):
+// Turn rules (decided with the squad lead, see notes/phase1-tracker.md):
 //   - The turn passes when a revive skill is spent, whether or not it revived anyone.
 //   - Only the player whose turn it was moves the rotation on. Somebody casting out of turn (including a
 //     precast player firing early) spends their own skill and leaves everyone else's place alone.
