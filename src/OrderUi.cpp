@@ -215,6 +215,23 @@ namespace OrderUi
 			return text;
 		}
 
+		// Toggling it keeps the player where they are in the order.
+		void TogglePrecast(const Rezz::SessionView& aView, const std::string& aAccount)
+		{
+			if (Rezz::Demo::Running())
+			{
+				AddNotice("demo squad: stop the demo to change the real order", s_LastNowMs);
+				return;
+			}
+			std::vector<std::string>& precast = Settings::Current.Precast;
+			auto it = std::find(precast.begin(), precast.end(), aAccount);
+			if (it == precast.end()) { precast.push_back(aAccount); }
+			else { precast.erase(it); }
+			Live::SetPrecast(precast);
+			Settings::MarkDirty();
+			(void)aView;
+		}
+
 		void ApplyOrder(std::vector<std::string> aOrder)
 		{
 			// The demo squad is on screen with its own made-up players. Editing what is shown would write
@@ -351,7 +368,7 @@ namespace OrderUi
 				AddNotice("no order to share yet", s_LastNowMs);
 				return;
 			}
-			std::string line = Rezz::Share::Encode(aOrder, aRoster);
+			std::string line = Rezz::Share::Encode(aOrder, Settings::Current.Precast, aRoster);
 			ImGui::SetClipboardText(line.c_str());
 			AddNotice("copied: " + line + " - paste it in squad chat", s_LastNowMs);
 			Live::ClearRequest();
@@ -433,7 +450,7 @@ namespace OrderUi
 		void LayoutOptions()
 		{
 			Settings::Values& s = Settings::Current;
-			static const char* kNames[] = { "compact list", "big bars", "focus card", "horizontal strip" };
+			static const char* kNames[] = { "compact list", "big bars", "focus card", "horizontal strip", "next up" };
 			int layout = static_cast<int>(s.Layout);
 			ImGui::SetNextItemWidth(120);
 			if (ImGui::Combo("layout", &layout, kNames, IM_ARRAYSIZE(kNames)))
@@ -548,6 +565,14 @@ namespace OrderUi
 		}
 
 		bool IsUp(const Frame& aFrame, int aIndex)     { return aIndex == aFrame.View->Turn.UpIndex; }
+
+		// A precast player may spend their revive before their turn comes, on their own call. They are in the
+		// order like everybody else; this only says so.
+		bool IsPrecast(const Frame& aFrame, int aIndex)
+		{
+			const std::vector<std::string>& precast = aFrame.View->Precast;
+			return std::find(precast.begin(), precast.end(), Row(aFrame, aIndex).Account) != precast.end();
+		}
 		bool IsBackup(const Frame& aFrame, int aIndex) { return aIndex == aFrame.View->BackupIndex; }
 
 		ImVec4 NameColor(const Frame& aFrame, int aIndex)
@@ -658,6 +683,14 @@ namespace OrderUi
 			ImGui::TextColored(kGrey, "%s", aFrame.Names[aIndex].c_str());
 			ImGui::Separator();
 			if (ImGui::MenuItem("Remove player")) { RemoveFromOrder(view.Order, aIndex); }
+			if (ImGui::MenuItem("May cast early (precast)", nullptr, IsPrecast(aFrame, aIndex)))
+			{
+				TogglePrecast(view, Row(aFrame, aIndex).Account);
+			}
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip("They spend their revive when they see it coming, instead of waiting for their turn.");
+			}
 			NicknameMenu(Row(aFrame, aIndex).Account);
 			AddMeItem(view);
 			if (ImGui::MenuItem("Move up", nullptr, false, aIndex > 0)) { MoveInOrder(view.Order, aIndex, aIndex - 1); }
@@ -995,39 +1028,21 @@ namespace OrderUi
 			return barWidth;
 		}
 
-		// ------------------------------------------------------------------ layout 4: focus card
-		//
-		// Whoever is up fills a card at the top; everyone else is a queue underneath it, in reading order
-		// starting after the card. Made for a glance: one name, large.
-		float LayoutFocus(Frame& aFrame)
+		// The card at the top of the focus layouts: who is up, in the biggest font the window has, coloured by
+		// what it means for us. Leaves the cursor under itself.
+		float DrawUpCard(Frame& aFrame, float aCardWidth, const FontRef& aHugeFont)
 		{
-			LastFrame.Layout = "focus";
 			const Rezz::TurnView& turn = aFrame.View->Turn;
 			ImDrawList* draw = ImGui::GetWindowDrawList();
-			FontRef hugeFont = PickFont(1.6f, true);
 			FontRef smallFont{ ImGui::GetFont(), ImGui::GetFontSize() };
-
 			float line = aFrame.Line;
 			float pad = std::round(line * 0.6f);
-			float cardHeight = std::round(hugeFont.Size * 1.35f + line * 1.6f);
-
-			// The queue wraps into up to three columns, so a big squad grows downwards slowly.
-			std::vector<int> visible = VisibleRows(aFrame);
-			std::vector<int> queue;
-			for (int i : visible) { if (!IsUp(aFrame, i)) { queue.push_back(i); } }
-			int columns = queue.size() > 4 ? 3 : 1;
-			// Every cell is laid out the same way, so the states line up in a column instead of following
-			// names of different lengths.
-			float queueNameWidth = 0.0f;
-			for (int i : queue) { queueNameWidth = std::max(queueNameWidth, ImGui::CalcTextSize(aFrame.Names[i].c_str()).x); }
-			float queueMarkerWidth = ImGui::CalcTextSize("99.").x;
-			float queueStatusX = queueMarkerWidth + aFrame.Space + line + aFrame.Space + queueNameWidth + aFrame.Space;
-			float cellWidth = queue.empty() ? 0.0f : queueStatusX + ImGui::CalcTextSize("ready?").x + aFrame.Space * 2;
-			float cardWidth = std::max(cellWidth * columns, hugeFont.Measure("YOUR TURN").x + pad * 2);
-
-			// The card.
-			int upIndex = turn.UpIndex;
+			float cardHeight = std::round(aHugeFont.Size * 1.35f + line * 1.6f);
+			float cardWidth = aCardWidth;
+			FontRef hugeFont = aHugeFont;
 			ImVec2 cardPos = ImGui::GetCursorPos();
+
+			int upIndex = turn.UpIndex;
 			if (upIndex >= 0) { ImGui::PushID(upIndex); RowInteraction(aFrame, upIndex, ImVec2(cardWidth, cardHeight)); ImGui::PopID(); }
 			ImVec2 min = ImGui::GetCursorScreenPos();
 			ImVec2 max(min.x + cardWidth, min.y + cardHeight);
@@ -1076,17 +1091,60 @@ namespace OrderUi
 				: (turn.NextReadyIndex >= 0 ? "next: " + aFrame.Names[turn.NextReadyIndex] + " in " +
 					SecondsText(turn.Rows[turn.NextReadyIndex].ReadyInMs) : std::string("no backup ready"));
 			if (ours) { backup = "backup: you"; }
-			DrawText(smallFont, ImVec2(min.x + pad, secondY),
-				mine ? ImVec4(0.78f, 0.90f, 0.78f, 1.0f) : ours ? kOrange : kGrey, backup.c_str());
+
+			// Where we stand keeps its corner, and the backup line gives way rather than running into it.
+			std::string mineText;
 			if (aFrame.SelfIndex >= 0 && !mine)
 			{
-				std::string mineText = "you: " + MarkerLabel(aFrame, aFrame.SelfIndex) + " " +
+				mineText = "you: " + MarkerLabel(aFrame, aFrame.SelfIndex) + " " +
 					StatusLabel(turn.Rows[aFrame.SelfIndex]);
-				float width = smallFont.Measure(mineText.c_str()).x;
-				DrawText(smallFont, ImVec2(max.x - pad - width, secondY), kYellow, mineText.c_str());
+			}
+			float mineWidth = mineText.empty() ? 0.0f : smallFont.Measure(mineText.c_str()).x + aFrame.Space;
+			float backupRoom = cardWidth - pad * 2 - mineWidth;
+			while (backup.size() > 4 && smallFont.Measure(backup.c_str()).x > backupRoom) { backup.pop_back(); }
+			DrawText(smallFont, ImVec2(min.x + pad, secondY),
+				mine ? ImVec4(0.78f, 0.90f, 0.78f, 1.0f) : ours ? kOrange : kGrey, backup.c_str());
+			if (!mineText.empty())
+			{
+				DrawText(smallFont, ImVec2(max.x - pad - smallFont.Measure(mineText.c_str()).x, secondY),
+					kYellow, mineText.c_str());
 			}
 			if (upIndex >= 0) { NoteRow(aFrame, upIndex); }
 			ImGui::SetCursorPos(ImVec2(cardPos.x, cardPos.y + cardHeight + ImGui::GetStyle().ItemSpacing.y));
+			return cardHeight;
+		}
+
+		// ------------------------------------------------------------------ layout 4: focus card
+		//
+		// Whoever is up fills a card at the top; everyone else is a queue underneath it, in reading order
+		// starting after the card. Made for a glance: one name, large.
+		float LayoutFocus(Frame& aFrame)
+		{
+			LastFrame.Layout = "focus";
+			const Rezz::TurnView& turn = aFrame.View->Turn;
+			FontRef hugeFont = PickFont(1.6f, true);
+
+			float line = aFrame.Line;
+			float pad = std::round(line * 0.6f);
+
+			// The queue wraps into up to three columns, so a big squad grows downwards slowly.
+			std::vector<int> visible = VisibleRows(aFrame);
+			std::vector<int> queue;
+			for (int i : visible) { if (!IsUp(aFrame, i)) { queue.push_back(i); } }
+			int columns = queue.size() > 4 ? 3 : 1;
+			// Every cell is laid out the same way, so the states line up in a column instead of following
+			// names of different lengths.
+			float queueNameWidth = 0.0f;
+			for (int i : queue) { queueNameWidth = std::max(queueNameWidth, ImGui::CalcTextSize(aFrame.Names[i].c_str()).x); }
+			float queueMarkerWidth = ImGui::CalcTextSize("99.").x;
+			float queueStatusX = queueMarkerWidth + aFrame.Space + line + aFrame.Space + queueNameWidth + aFrame.Space;
+			float cellWidth = queue.empty() ? 0.0f : queueStatusX + ImGui::CalcTextSize("ready?").x + aFrame.Space * 2;
+			float secondLineWidth = ImGui::CalcTextSize("backup: ").x + queueNameWidth + aFrame.Space +
+				ImGui::CalcTextSize("you: 99 casting").x;
+			float cardWidth = std::max({ cellWidth * columns, hugeFont.Measure("YOUR TURN").x + pad * 2,
+				secondLineWidth + pad * 2 });
+
+			DrawUpCard(aFrame, cardWidth, hugeFont);
 
 			// The queue.
 			ImGui::TextColored(kGrey, "queue");
@@ -1124,6 +1182,93 @@ namespace OrderUi
 			}
 			int lines = queue.empty() ? 0 : (static_cast<int>(queue.size()) + columns - 1) / columns;
 			ImGui::SetCursorPos(ImVec2(queuePos.x, queuePos.y + lines * (line + 2)));
+			return cardWidth;
+		}
+
+		// ------------------------------------------------------------------ layout 6: next up
+		//
+		// Only what has to be acted on: the player who is up on the card, the backup directly under it, and
+		// however many of the following players "max displayed" asks for. The list rolls with the turn, so
+		// the top row is always the backup and the positions never mean "place in the order" here - they are
+		// simply the order things will happen in.
+		float LayoutNextUp(Frame& aFrame)
+		{
+			LastFrame.Layout = "nextup";
+			const Rezz::TurnView& turn = aFrame.View->Turn;
+			FontRef hugeFont = PickFont(1.6f, true);
+
+			float line = aFrame.Line;
+			float pad = std::round(line * 0.6f);
+			float spacing = aFrame.Space;
+
+			// Whoever is up leads, the backup follows, then the rest in the order the turn will reach them.
+			std::vector<int> rolled;
+			if (aFrame.View->BackupIndex >= 0) { rolled.push_back(aFrame.View->BackupIndex); }
+			int count = static_cast<int>(turn.Rows.size());
+			int start = turn.UpIndex >= 0 ? turn.UpIndex : 0;
+			for (int step = 1; step <= count; step++)
+			{
+				int index = (start + step) % count;
+				if (index == turn.UpIndex || index == aFrame.View->BackupIndex) { continue; }
+				rolled.push_back(index);
+			}
+			int shown = Settings::Current.OverlayMaxRows;
+			if (shown > 0 && static_cast<int>(rolled.size()) > shown) { rolled.resize(static_cast<size_t>(shown)); }
+
+			float nameWidth = 0.0f;
+			for (const std::string& name : aFrame.Names) { nameWidth = std::max(nameWidth, ImGui::CalcTextSize(name.c_str()).x); }
+			float markerWidth = 0.0f;
+			for (const char* text : { "BK", "99" }) { markerWidth = std::max(markerWidth, ImGui::CalcTextSize(text).x); }
+			float statusWidth = 0.0f;
+			for (const char* text : { "ready?", "casting", "120s", "DOWN", "DEAD", "away" })
+			{
+				statusWidth = std::max(statusWidth, ImGui::CalcTextSize(text).x);
+			}
+			float rowWidth = markerWidth + spacing + line + spacing + nameWidth + spacing + statusWidth;
+			// The card's second line carries "backup: <name>" and "you: N <state>" side by side.
+			float secondLineWidth = ImGui::CalcTextSize("backup: ").x + nameWidth + spacing +
+				ImGui::CalcTextSize("you: 99 casting").x;
+			float cardWidth = std::max({ rowWidth + pad * 2, hugeFont.Measure("YOUR TURN").x + pad * 2,
+				secondLineWidth + pad * 2 });
+
+			DrawUpCard(aFrame, cardWidth, hugeFont);
+
+			float x0 = ImGui::GetCursorPosX();
+			float iconX = x0 + markerWidth + spacing;
+			float nameX = iconX + line + spacing;
+			float statusX = nameX + nameWidth + spacing;
+			for (size_t position = 0; position < rolled.size(); position++)
+			{
+				int i = rolled[position];
+				const Rezz::OrderRow& row = turn.Rows[i];
+				ImGui::PushID(i);
+				ImVec2 rowPos = ImGui::GetCursorPos();
+				RowInteraction(aFrame, i, ImVec2(cardWidth, line));
+
+				ImVec2 min = ImGui::GetCursorScreenPos();
+				ImVec2 max(min.x + cardWidth, min.y + line);
+				CooldownFill(row, ImVec2(min.x, max.y - 2), max, 0.0f);
+				HighlightRow(aFrame, i, ImVec2(min.x - 1, min.y - 1), ImVec2(max.x - 1, max.y + 1), 2.0f);
+
+				// The first row is whoever takes over; the others are just "after that".
+				if (IsBackup(aFrame, i)) { ImGui::TextColored(kOrange, "BK"); }
+				else { ImGui::TextColored(kGrey, "%zu", position + 1); }
+
+				ImGui::SameLine(iconX);
+				ProfessionIcon(row.Account, Member(aFrame, i), !IsRelevant(row.Status));
+				ImGui::SameLine(nameX);
+				PlayerNameText(row.Account, aFrame.Names[i], NameColor(aFrame, i), Member(aFrame, i));
+				std::string status = StatusLabel(row);
+				if (!status.empty())
+				{
+					ImGui::SameLine(statusX);
+					ImGui::TextColored(StatusColor(row), "%s", status.c_str());
+				}
+				NoteRow(aFrame, i);
+
+				ImGui::SetCursorPos(ImVec2(rowPos.x, rowPos.y + line + ImGui::GetStyle().ItemSpacing.y));
+				ImGui::PopID();
+			}
 			return cardWidth;
 		}
 
@@ -1298,7 +1443,13 @@ namespace OrderUi
 				for (int i = 0; i < static_cast<int>(aView.Turn.Rows.size()); i++)
 				{
 					const Rezz::OrderRow& row = aView.Turn.Rows[i];
-					frame.Names.push_back(ShortName(PlayerName(row.Account, Find(aRoster, row.Account))));
+					std::string name = ShortName(PlayerName(row.Account, Find(aRoster, row.Account)));
+					// The same mark the shared chat line uses, so the two read the same way.
+					if (std::find(aView.Precast.begin(), aView.Precast.end(), row.Account) != aView.Precast.end())
+					{
+						name += Rezz::Share::kPrecastMark;
+					}
+					frame.Names.push_back(name);
 					if (row.Account == aView.SelfAccount) { frame.SelfIndex = i; }
 				}
 				switch (s.Layout)
@@ -1306,6 +1457,7 @@ namespace OrderUi
 					case Settings::OverlayLayout::Bars:  contentWidth = std::max(contentWidth, LayoutBars(frame)); break;
 					case Settings::OverlayLayout::Focus: contentWidth = std::max(contentWidth, LayoutFocus(frame)); break;
 					case Settings::OverlayLayout::Strip: contentWidth = std::max(contentWidth, LayoutStrip(frame)); break;
+					case Settings::OverlayLayout::NextUp: contentWidth = std::max(contentWidth, LayoutNextUp(frame)); break;
 					default:                             contentWidth = std::max(contentWidth, LayoutCompact(frame)); break;
 				}
 			}
@@ -1556,7 +1708,7 @@ namespace OrderUi
 			if (ImGui::Button("Copy for squad chat")) { CopyOrder(aView); }
 			if (ImGui::IsItemHovered())
 			{
-				ImGui::SetTooltip("%s", Rezz::Share::Encode(aView.Order, aView.Roster).c_str());
+				ImGui::SetTooltip("%s", Rezz::Share::Encode(aView.Order, aView.Precast, aView.Roster).c_str());
 			}
 			ImGui::SameLine();
 			if (ImGui::Button("Clear order")) { ImGui::OpenPopup("clear_order"); }
@@ -1675,7 +1827,7 @@ namespace OrderUi
 						ImGui::TextColored(kRed, "(%s has no revive skill)", Rezz::ProfessionShortName(asker->Profession));
 					}
 				}
-				ImGui::TextColored(kGrey, "%s", Rezz::Share::Encode(withThem, aView.Roster).c_str());
+				ImGui::TextColored(kGrey, "%s", Rezz::Share::Encode(withThem, aView.Precast, aView.Roster).c_str());
 
 				if (inOrder)
 				{
@@ -1751,6 +1903,7 @@ namespace OrderUi
 	void Init()
 	{
 		Live::SetOrder(Settings::Current.Order);
+		Live::SetPrecast(Settings::Current.Precast);
 		Live::SetShareRules(Settings::Current.ShareFromLeaders, Settings::Current.ShareFromAnyone);
 		Live::SetAnswerRule(Settings::Current.AnswerRequests);
 	}
@@ -1783,9 +1936,10 @@ namespace OrderUi
 		Rezz::SessionView live = Live::GetView();
 		// Demo mode shows a squad that isn't there; the real order must not be touched while it runs.
 		Rezz::SessionView view = Rezz::Demo::Running() ? Rezz::Demo::View(aContext.NowMs) : live;
-		if (!Rezz::Demo::Running() && view.Order != Settings::Current.Order)
+		if (!Rezz::Demo::Running() && (view.Order != Settings::Current.Order || view.Precast != Settings::Current.Precast))
 		{
 			Settings::Current.Order = view.Order;
+			Settings::Current.Precast = view.Precast;
 			Settings::MarkDirty();
 		}
 		if (CopyOrderRequested.exchange(false)) { CopyOrder(view); }

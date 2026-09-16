@@ -15,11 +15,16 @@ namespace Settings
 	// How the turn window draws the order. Compact: one text line per player. Bars: a tall bar per player,
 	// the recharge filling it. Focus: whoever is up on a big card, the rest as a queue below it. Strip: the
 	// order left to right, for a thin bar along an edge of the screen.
-	enum class OverlayLayout : int { Compact = 0, Bars = 1, Focus = 2, Strip = 3 };
+	// NextUp: only what has to be acted on - the player who is up, the backup, and the next few, rolling
+	// with the turn so the top of the list is always the one to watch.
+	enum class OverlayLayout : int { Compact = 0, Bars = 1, Focus = 2, Strip = 3, NextUp = 4 };
 
 	struct Values
 	{
 		std::vector<std::string> Order;             // account names, in revive order
+		// Players who may spend their revive before their turn, when they see a fight going badly. They are
+		// in the order like anyone else; the window and the shared line just say so.
+		std::vector<std::string> Precast;
 		std::map<std::string, std::string> Nicknames; // account name -> name to show instead
 		// Named orders, for squads that run together often. Saved as preset=<name>=<account>><account>...
 		std::map<std::string, std::vector<std::string>> Presets;

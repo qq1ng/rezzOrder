@@ -50,6 +50,7 @@ namespace Rezz
 		std::string              From;                        // account of the sender, with the leading ':'
 		SquadRole                FromRole = SquadRole::Unknown;
 		std::vector<std::string> Accounts;                    // resolved against our own squad roster
+		std::vector<std::string> Precast;                     // of those, the ones marked free to fire early
 		std::vector<std::string> Unknown;                     // names in the message we could not place
 		int                      OurPlaceNow  = 0;            // 1-based place in the order we have, 0 not in it
 		int                      OurPlaceThen = 0;            // ... and in the one being offered
@@ -69,6 +70,7 @@ namespace Rezz
 		int                       BackupIndex = -1; // row index into Turn.Rows, -1 none (next ready after who is up)
 		std::vector<RosterMember> Roster;           // sorted: revive professions first, then by account
 		std::vector<std::string>  Order;
+		std::vector<std::string>  Precast;         // of those, the ones free to cast before their turn
 		bool                      SquadInCombat = false;
 		uint64_t                  NowMs         = 0;
 		std::string               SelfAccount;
@@ -113,6 +115,9 @@ namespace Rezz
 
 		// The order as this client set it: ours to answer questions about.
 		void SetOrder(std::vector<std::string> aAccounts);
+		// Who in it may fire early. Kept beside the order, not inside the rotation.
+		void SetPrecast(std::vector<std::string> aAccounts);
+		const std::vector<std::string>& Precast() const { return m_Precast; }
 		// Whether the order on screen was built here, rather than taken over from somebody else's share.
 		bool OrderIsOurs() const { return m_OrderFrom.empty(); }
 		// Our own place in the order, 1-based; 0 when we are not in it.
@@ -186,6 +191,7 @@ namespace Rezz
 		std::string                                   m_RequestFrom;
 		uint64_t                                      m_RequestAtMs     = 0;
 		std::string                                   m_OrderFrom;   // empty: we built this order ourselves
+		std::vector<std::string>                      m_Precast;
 		AnswerRule                                    m_AnswerRule   = AnswerRule::WhenOrderIsOurs;
 		bool                                          m_ShareFromLeaders = true;
 		bool                                          m_ShareFromAnyone  = false;

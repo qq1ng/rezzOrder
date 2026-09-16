@@ -37,20 +37,26 @@ namespace Rezz::Share
 			return aText.size() >= aPrefix.size() && aText.compare(0, aPrefix.size(), aPrefix) == 0;
 		}
 
-		std::string Join(const std::vector<std::string>& aTokens)
+		std::string Join(const std::vector<std::string>& aTokens, const std::vector<bool>& aPrecast)
 		{
 			std::string line = kPrefix;
-			for (size_t i = 0; i < aTokens.size(); i++) { line += (i == 0 ? " " : kSeparator) + aTokens[i]; }
+			for (size_t i = 0; i < aTokens.size(); i++)
+			{
+				line += (i == 0 ? " " : kSeparator) + aTokens[i];
+				if (i < aPrecast.size() && aPrecast[i]) { line += kPrecastMark; }
+			}
 			return line;
 		}
 	}
 
-	std::string Encode(const std::vector<std::string>& aOrder, const std::vector<RosterMember>& aRoster)
+	std::string Encode(const std::vector<std::string>& aOrder, const std::vector<std::string>& aPrecast,
+		const std::vector<RosterMember>& aRoster)
 	{
 		if (aOrder.empty()) { return {}; }
 
 		// The part before the dot is what people call each other, unless two squad members share it.
 		std::vector<std::string> tokens;
+		std::vector<bool> precast;
 		for (const std::string& account : aOrder)
 		{
 			std::string display = DisplayAccount(account);
@@ -60,9 +66,10 @@ namespace Rezz::Share
 				if (Lower(DisplayAccount(member.Account)) == Lower(display)) { sharing++; }
 			}
 			tokens.push_back(sharing > 1 ? WithoutColon(account) : display);
+			precast.push_back(std::find(aPrecast.begin(), aPrecast.end(), account) != aPrecast.end());
 		}
 
-		std::string line = Join(tokens);
+		std::string line = Join(tokens, precast);
 		if (line.size() <= kMaxChatChars) { return line; }
 
 		// Too long: shorten every name, longest prefix first, and stop at the first length that fits. Lengths
@@ -75,21 +82,29 @@ namespace Rezz::Share
 			std::sort(unique.begin(), unique.end());
 			if (std::adjacent_find(unique.begin(), unique.end()) != unique.end()) { continue; }
 
-			line = Join(shortened);
+			line = Join(shortened, precast);
 			tokens = shortened; // the shortest that still tells them apart, in case nothing fits
 			if (line.size() <= kMaxChatChars) { return line; }
 		}
 
 		// Still too long: the players at the end of a very long order are the ones who lose their turn last.
-		while (tokens.size() > 1 && Join(tokens).size() > kMaxChatChars) { tokens.pop_back(); }
-		return Join(tokens);
+		while (tokens.size() > 1 && Join(tokens, precast).size() > kMaxChatChars)
+		{
+			tokens.pop_back();
+			precast.pop_back();
+		}
+		return Join(tokens, precast);
 	}
 
 	Message Parse(const std::string& aText)
 	{
 		Message message;
 		std::string text = Trim(aText);
-		if (!StartsWith(Lower(text), kPrefix)) { return message; }
+		std::string lower = Lower(text);
+
+		// "?rezzorder" asks; "!rezzorder ..." tells.
+		if (StartsWith(lower, kRequestText)) { message.What = Kind::Request; return message; }
+		if (!StartsWith(lower, kPrefix)) { return message; }
 
 		std::string rest = Trim(text.substr(std::string(kPrefix).size()));
 		if (rest.empty() || rest == "?") { message.What = Kind::Request; return message; }
@@ -101,22 +116,34 @@ namespace Rezz::Share
 			if (character == '>' || character == ',')
 			{
 				std::string name = Trim(token);
-				if (!name.empty()) { message.Names.push_back(name); }
 				token.clear();
+				if (name.empty()) { continue; }
+
+				Entry entry;
+				// A trailing "*" means they may spend their revive before their turn comes.
+				if (name.back() == kPrecastMark)
+				{
+					entry.Precast = true;
+					name.pop_back();
+					name = Trim(name);
+				}
+				if (name.empty()) { continue; }
+				entry.Name = name;
+				message.Entries.push_back(entry);
 				continue;
 			}
 			token += character;
 		}
-		if (!message.Names.empty()) { message.What = Kind::Order; }
+		if (!message.Entries.empty()) { message.What = Kind::Order; }
 		return message;
 	}
 
-	Resolved Resolve(const std::vector<std::string>& aNames, const std::vector<RosterMember>& aRoster)
+	Resolved Resolve(const std::vector<Entry>& aEntries, const std::vector<RosterMember>& aRoster)
 	{
 		Resolved resolved;
-		for (const std::string& name : aNames)
+		for (const Entry& entry : aEntries)
 		{
-			std::string wanted = Lower(Trim(name));
+			std::string wanted = Lower(Trim(entry.Name));
 			if (wanted.empty()) { continue; }
 
 			std::vector<std::string> exact;
@@ -140,8 +167,10 @@ namespace Rezz::Share
 			const std::vector<std::string>& matches = !exact.empty() ? exact : prefix;
 			bool already = !matches.empty() &&
 				std::find(resolved.Accounts.begin(), resolved.Accounts.end(), matches.front()) != resolved.Accounts.end();
-			if (matches.size() == 1 && !already) { resolved.Accounts.push_back(matches.front()); }
-			else { resolved.Unknown.push_back(name); }
+			if (matches.size() != 1 || already) { resolved.Unknown.push_back(entry.Name); continue; }
+
+			resolved.Accounts.push_back(matches.front());
+			if (entry.Precast) { resolved.Precast.push_back(matches.front()); }
 		}
 		return resolved;
 	}

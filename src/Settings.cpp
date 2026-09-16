@@ -61,6 +61,7 @@ namespace Settings
 			std::string value = line.substr(eq + 1);
 
 			if (key == "order") { if (!value.empty()) { values.Order.push_back(value); } }
+			else if (key == "precast") { if (!value.empty()) { values.Precast.push_back(value); } }
 			else if (key == "nick")
 			{
 				// nick=<account>=<nickname>
@@ -151,6 +152,7 @@ namespace Settings
 			if (!out) { return; }
 			const Values& v = Current;
 			for (const std::string& account : v.Order) { out << "order=" << account << "\n"; }
+			for (const std::string& account : v.Precast) { out << "precast=" << account << "\n"; }
 			for (const auto& [account, nickname] : v.Nicknames) { out << "nick=" << account << "=" << nickname << "\n"; }
 			for (const auto& [name, accounts] : v.Presets)
 			{

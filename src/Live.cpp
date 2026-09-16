@@ -106,6 +106,12 @@ namespace Live
 		s_Session.SetOrder(aAccounts);
 	}
 
+	void SetPrecast(const std::vector<std::string>& aAccounts)
+	{
+		std::scoped_lock lock(s_Mutex);
+		s_Session.SetPrecast(aAccounts);
+	}
+
 	Rezz::SessionView GetView()
 	{
 		uint32_t now = timeGetTime();

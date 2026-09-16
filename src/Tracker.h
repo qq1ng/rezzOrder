@@ -15,7 +15,8 @@
 //
 // Turn rules (decided with the squad lead, see docs/phase1-tracker.md):
 //   - The turn passes when a revive skill is spent, whether or not it revived anyone.
-//   - The rotation continues after whoever in the order used a skill last, even if it was out of turn.
+//   - Only the player whose turn it was moves the rotation on. Somebody casting out of turn (including a
+//     precast player firing early) spends their own skill and leaves everyone else's place alone.
 //   - Players whose skill is on cooldown, or who are downed or dead, are skipped.
 namespace Rezz
 {

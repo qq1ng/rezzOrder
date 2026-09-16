@@ -238,6 +238,7 @@ namespace Live
 	void Tick() {}
 
 	void SetOrder(const std::vector<std::string>& aAccounts) { s_View.Order = aAccounts; }
+	void SetPrecast(const std::vector<std::string>& aAccounts) { s_View.Precast = aAccounts; }
 	void SetShareRules(bool, bool) {}
 	void SetAnswerRule(int) {}
 	void AcceptShare() { s_View.HasShare = false; }

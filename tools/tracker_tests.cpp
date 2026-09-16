@@ -86,14 +86,42 @@ namespace
 		CHECK(Up(t, 4000) == B);
 	}
 
-	void TestOutOfTurnContinuesAfterUser()
+	void TestOutOfTurnLeavesTheRotationAlone()
 	{
 		Rezz::Tracker t;
 		t.SetOrder({ A, B, C });
-		Use(t, 1000, B, IOL, 1300); // A was up, B went instead
-		CHECK(Up(t, 5000) == C);
-		Use(t, 6000, C, BS);
-		CHECK(Up(t, 10000) == A); // wraps around; B is on cooldown anyway
+		Use(t, 1000, B, IOL, 1300); // A was up, B went anyway: B spends theirs and nothing else changes
+		CHECK(Up(t, 5000) == A);
+		CHECK(t.LastOrderedUser().empty());
+
+		Use(t, 6000, A, BS);        // A finally goes, on their turn, so the rotation moves on
+		CHECK(t.LastOrderedUser() == A);
+		CHECK(Up(t, 10000) == C);   // B is on cooldown from the early cast
+	}
+
+	// Six ready players, 1 is up and 2 is the backup, and 4 casts anyway: nobody loses their place.
+	void TestOutOfTurnKeepsEveryonesPlace()
+	{
+		const std::string P[6] = { ":1.1", ":2.2", ":3.3", ":4.4", ":5.5", ":6.6" };
+		Rezz::Tracker t;
+		t.SetOrder({ P[0], P[1], P[2], P[3], P[4], P[5] });
+		Rezz::TurnView view = t.GetTurn(1000);
+		CHECK(view.Rows[view.UpIndex].Account == P[0]);
+		CHECK(view.Rows[view.BackupIndex].Account == P[1]);
+
+		Use(t, 2000, P[3], IOL, 1300); // 4 jumps in, or is a precast player firing early
+		view = t.GetTurn(5000);
+		CHECK(view.Rows[view.UpIndex].Account == P[0]);     // 1 is still up
+		CHECK(view.Rows[view.BackupIndex].Account == P[1]); // 2 is still the backup
+		CHECK(view.Rows[3].Status == Rezz::Eligibility::Cooldown); // only 4 changed
+
+		// And the rotation runs on from 1 as it always would, skipping 4 while they recharge.
+		Use(t, 6000, P[0], IOL, 1300);
+		CHECK(Up(t, 7000) == P[1]);
+		Use(t, 8000, P[1], IOL, 1300);
+		CHECK(Up(t, 9000) == P[2]);
+		Use(t, 10000, P[2], IOL, 1300);
+		CHECK(Up(t, 11000) == P[4]); // 4 is on cooldown, so it falls to 5
 	}
 
 	void TestSkipCooldownAndDowned()
@@ -178,14 +206,14 @@ namespace
 	{
 		Rezz::Tracker t;
 		t.SetOrder({ A, B, C });
-		Use(t, 1000, B, BS);
+		Use(t, 1000, A, BS);     // A was up, so the rotation moves past them
 		t.SetOrder({ A, B, C }); // same order posted again: rotation kept
-		CHECK(Up(t, 5000) == C);
+		CHECK(Up(t, 5000) == B);
 		t.SetOrder({ C, B, A }); // new order: starts at the top (field test 2026-09-16)
 		CHECK(t.LastOrderedUser().empty());
 		CHECK(Up(t, 5000) == C);
-		t.SetOrder({ B, A, C }); // B is first but on cooldown: skipped
-		CHECK(Up(t, 5000) == A);
+		t.SetOrder({ A, C, B }); // A is first but on cooldown: skipped
+		CHECK(Up(t, 5000) == C);
 	}
 
 	void TestStaleDownedAndStuckCast()
@@ -554,13 +582,13 @@ namespace
 	{
 		std::vector<Rezz::RosterMember> roster = { Who(":Gorath.5076", "Gorath"), Who(":murako.9143", "murako"),
 			Who(":Sairana.6610", "Sairana") };
-		std::string line = Rezz::Share::Encode({ ":Gorath.5076", ":murako.9143", ":Sairana.6610" }, roster);
-		CHECK(line == "!rezz Gorath > murako > Sairana");
+		std::string line = Rezz::Share::Encode({ ":Gorath.5076", ":murako.9143", ":Sairana.6610" }, {}, roster);
+		CHECK(line == "!rezzorder Gorath > murako > Sairana");
 
 		// Two accounts with the same name before the dot: both get their full account name.
 		roster.push_back(Who(":Gorath.1111", "Gorath the second"));
-		line = Rezz::Share::Encode({ ":Gorath.5076", ":murako.9143" }, roster);
-		CHECK(line == "!rezz Gorath.5076 > murako");
+		line = Rezz::Share::Encode({ ":Gorath.5076", ":murako.9143" }, {}, roster);
+		CHECK(line == "!rezzorder Gorath.5076 > murako");
 	}
 
 	void TestShareFitsInAChatMessage()
@@ -573,13 +601,13 @@ namespace
 			order.push_back(account);
 			roster.push_back(Who(account, "Someone"));
 		}
-		std::string line = Rezz::Share::Encode(order, roster);
+		std::string line = Rezz::Share::Encode(order, {}, roster);
 		CHECK(line.size() <= Rezz::Share::kMaxChatChars);
 		// Whatever survives still has to be readable by the other clients.
 		Rezz::Share::Message message = Rezz::Share::Parse(line);
 		CHECK(message.What == Rezz::Share::Kind::Order);
-		CHECK(!message.Names.empty());
-		CHECK(Rezz::Share::Resolve(message.Names, roster).Unknown.empty());
+		CHECK(!message.Entries.empty());
+		CHECK(Rezz::Share::Resolve(message.Entries, roster).Unknown.empty());
 	}
 
 	// Whatever goes into a chat line has to come back out as the same squad members: this is the whole
@@ -601,12 +629,12 @@ namespace
 			// Somebody in the squad who is not in the order must not be picked up by mistake.
 			roster.push_back(Who(":Bystander.4444", "Bystander"));
 
-			std::string line = Rezz::Share::Encode(test.Accounts, roster);
+			std::string line = Rezz::Share::Encode(test.Accounts, {}, roster);
 			if (line.size() > Rezz::Share::kMaxChatChars) { std::printf("  (%s) line too long\n", test.Name); }
 			CHECK(line.size() <= Rezz::Share::kMaxChatChars);
 			Rezz::Share::Message message = Rezz::Share::Parse(line);
 			CHECK(message.What == Rezz::Share::Kind::Order);
-			Rezz::Share::Resolved resolved = Rezz::Share::Resolve(message.Names, roster);
+			Rezz::Share::Resolved resolved = Rezz::Share::Resolve(message.Entries, roster);
 			if (resolved.Accounts != test.Accounts)
 			{
 				std::printf("  (%s) '%s' came back as %zu of %zu\n", test.Name, line.c_str(),
@@ -633,30 +661,73 @@ namespace
 			order.push_back(account);
 			roster.push_back(Who(account, ""));
 		}
-		std::string line = Rezz::Share::Encode(order, roster);
+		std::string line = Rezz::Share::Encode(order, {}, roster);
 		CHECK(line.size() <= Rezz::Share::kMaxChatChars);
-		Rezz::Share::Resolved resolved = Rezz::Share::Resolve(Rezz::Share::Parse(line).Names, roster);
+		Rezz::Share::Resolved resolved = Rezz::Share::Resolve(Rezz::Share::Parse(line).Entries, roster);
 		if (resolved.Accounts.size() != order.size()) { std::printf("  kept %zu of 12: %s\n", resolved.Accounts.size(), line.c_str()); }
 		CHECK(resolved.Accounts == order);
+	}
+
+	// Precast players ride along in the same line, marked with a star, and come back marked.
+	void TestShareCarriesPrecast()
+	{
+		std::vector<Rezz::RosterMember> roster = { Who(":Gorath.5076", "Gorath"), Who(":murako.9143", "murako"),
+			Who(":Sairana.6610", "Sairana") };
+		std::vector<std::string> order = { ":Gorath.5076", ":murako.9143", ":Sairana.6610" };
+		std::string line = Rezz::Share::Encode(order, { ":murako.9143" }, roster);
+		CHECK(line == "!rezzorder Gorath > murako* > Sairana");
+
+		Rezz::Share::Message message = Rezz::Share::Parse(line);
+		CHECK(message.What == Rezz::Share::Kind::Order);
+		CHECK(message.Entries.size() == 3);
+		CHECK(!message.Entries[0].Precast && message.Entries[1].Precast && !message.Entries[2].Precast);
+
+		Rezz::Share::Resolved resolved = Rezz::Share::Resolve(message.Entries, roster);
+		CHECK(resolved.Accounts == order);
+		CHECK(resolved.Precast == std::vector<std::string>({ ":murako.9143" }));
+
+		// A star typed with a space before it, or on a shortened name, still means the same thing.
+		Rezz::Share::Message typed = Rezz::Share::Parse("!rezzorder Gorath, mura *, Sairana");
+		CHECK(typed.Entries.size() == 3 && typed.Entries[1].Precast);
+		CHECK(Rezz::Share::Resolve(typed.Entries, roster).Precast == std::vector<std::string>({ ":murako.9143" }));
+	}
+
+	// The whole path: somebody shares an order with a precast player and our session takes both over.
+	void TestSharedPrecastReachesTheSession()
+	{
+		Rezz::Session s;
+		s.OnAgentUpdate(Agent(A, 100, 7, 2, true, true), 0);
+		s.OnAgentUpdate(Agent(B, 200, 8, 4, true), 0);
+		s.OnAgentUpdate(Agent(C, 300, 9, 1, true), 0);
+		s.OnRole(B, Rezz::SquadRole::Leader, 1, 0);
+
+		s.OnChatMessage(B, "!rezzorder b > c* > a", 1000);
+		CHECK(s.Order() == std::vector<std::string>({ B, C, A }));
+		CHECK(s.Precast() == std::vector<std::string>({ C }));
+		CHECK(s.GetView(1500).Precast == std::vector<std::string>({ C }));
+
+		// An order without stars clears the old marks instead of keeping them around.
+		s.OnChatMessage(B, "!rezzorder b > c > a", 2000);
+		CHECK(s.Precast().empty());
 	}
 
 	void TestShareParsesWhatPeopleType()
 	{
 		using Kind = Rezz::Share::Kind;
 		CHECK(Rezz::Share::Parse("hello everyone").What == Kind::None);
-		CHECK(Rezz::Share::Parse("!rezz?").What == Kind::Request);
-		CHECK(Rezz::Share::Parse("  !REZZ  ").What == Kind::Request);
-		Rezz::Share::Message message = Rezz::Share::Parse("!rezz Gorath, murako > Sairana ");
+		CHECK(Rezz::Share::Parse("?rezzorder").What == Kind::Request);
+		CHECK(Rezz::Share::Parse("  ?REZZORDER  ").What == Kind::Request);
+		Rezz::Share::Message message = Rezz::Share::Parse("!rezzorder Gorath, murako > Sairana ");
 		CHECK(message.What == Kind::Order);
-		CHECK(message.Names.size() == 3);
-		CHECK(message.Names[1] == "murako");
+		CHECK(message.Entries.size() == 3);
+		CHECK(message.Entries[1].Name == "murako");
 	}
 
 	void TestShareResolvesAgainstTheSquad()
 	{
 		std::vector<Rezz::RosterMember> roster = { Who(":Gorath.5076", "Gorath"), Who(":murako.9143", "Sleeplxss"),
 			Who(":Sairana.6610", "Sairana") };
-		Rezz::Share::Resolved resolved = Rezz::Share::Resolve({ "Gora", "Sleeplxss", "Nobody" }, roster);
+		Rezz::Share::Resolved resolved = Rezz::Share::Resolve({ { "Gora", false }, { "Sleeplxss", false }, { "Nobody", false } }, roster);
 		CHECK(resolved.Accounts.size() == 2);
 		CHECK(resolved.Accounts[0] == ":Gorath.5076");
 		CHECK(resolved.Accounts[1] == ":murako.9143"); // matched by character name
@@ -672,13 +743,13 @@ namespace
 		s.OnRole(B, Rezz::SquadRole::Leader, 1, 0);
 		s.OnRole(C, Rezz::SquadRole::Member, 1, 0);
 
-		s.OnChatMessage(B, "!rezz c > b > a", 1000);
+		s.OnChatMessage(B, "!rezzorder c > b > a", 1000);
 		CHECK(s.Order() == std::vector<std::string>({ C, B, A }));
 		std::vector<Rezz::Notice> notices = s.TakeNotices();
 		CHECK(notices.size() == 1 && notices[0].Kind == Rezz::NoticeKind::ShareApplied);
 
 		// A plain member's order waits for us instead.
-		s.OnChatMessage(C, "!rezz a > b", 2000);
+		s.OnChatMessage(C, "!rezzorder a > b", 2000);
 		CHECK(s.Order() == std::vector<std::string>({ C, B, A }));
 		Rezz::SessionView view = s.GetView(2500);
 		CHECK(view.HasShare);
@@ -697,23 +768,23 @@ namespace
 		s.OnAgentUpdate(Agent(B, 200, 8, 4, true), 0);
 		s.SetOrder({ A, B });
 
-		s.OnChatMessage(B, "!rezz?", 1000);
+		s.OnChatMessage(B, "?rezzorder", 1000);
 		CHECK(s.GetView(2000).HasRequest);
 		CHECK(s.GetView(2000).RequestFrom == B);
 		CHECK(!s.GetView(1000 + Rezz::Session::kRequestShowMs + 1).HasRequest);
 
-		s.OnChatMessage(B, "!rezz?", 100000);
+		s.OnChatMessage(B, "?rezzorder", 100000);
 		CHECK(s.GetView(101000).HasRequest);
 		s.ClearRequest(); // answered, or waved away
 		CHECK(!s.GetView(101000).HasRequest);
 
 		// Without an order of our own there is nothing to answer with.
 		s.SetOrder({});
-		s.OnChatMessage(B, "!rezz?", 102000);
+		s.OnChatMessage(B, "?rezzorder", 102000);
 		CHECK(!s.GetView(103000).HasRequest);
 	}
 
-	// One "!rezz?" must not open a window on every screen in the squad: only the client whose order it is
+	// One "?rezzorder" must not open a window on every screen in the squad: only the client whose order it is
 	// gets asked, and even that closes as soon as somebody answers.
 	void TestOnlyTheOrdersOwnerIsAsked()
 	{
@@ -724,25 +795,25 @@ namespace
 		s.OnRole(B, Rezz::SquadRole::Leader, 1, 0);
 
 		// The commander's order arrives and we take it over: it is not ours to answer for.
-		s.OnChatMessage(B, "!rezz a > b > c", 1000);
+		s.OnChatMessage(B, "!rezzorder a > b > c", 1000);
 		CHECK(!s.OrderIsOurs());
-		s.OnChatMessage(C, "!rezz?", 2000);
+		s.OnChatMessage(C, "?rezzorder", 2000);
 		CHECK(!s.GetView(2500).HasRequest);
 		CHECK(s.TakeNotices().size() == 2); // the share and the request are still worth saying
 
 		// Building the order here makes it ours again.
 		s.SetOrder({ A, B });
 		CHECK(s.OrderIsOurs());
-		s.OnChatMessage(C, "!rezz?", 3000);
+		s.OnChatMessage(C, "?rezzorder", 3000);
 		CHECK(s.GetView(3500).HasRequest);
 
 		// Somebody else answered in chat: the question is settled for everyone.
-		s.OnChatMessage(B, "!rezz b > a", 4000);
+		s.OnChatMessage(B, "!rezzorder b > a", 4000);
 		CHECK(!s.GetView(4500).HasRequest);
 
 		// "always" is for the player who wants to answer whatever happens.
 		s.SetAnswerRule(Rezz::Session::AnswerRule::Always);
-		s.OnChatMessage(C, "!rezz?", 5000);
+		s.OnChatMessage(C, "?rezzorder", 5000);
 		CHECK(s.GetView(5500).HasRequest);
 		s.SetAnswerRule(Rezz::Session::AnswerRule::Never);
 		CHECK(!s.GetView(5500).HasRequest);
@@ -813,22 +884,22 @@ namespace
 		};
 
 		// Moved down the order.
-		s.OnChatMessage(B, "!rezz b > c > a", 1000);
+		s.OnChatMessage(B, "!rezzorder b > c > a", 1000);
 		CHECK(s.SelfPlace() == 3);
 		CHECK(lastText().find("you are now 3. (was 1.)") != std::string::npos);
 
 		// Same places again: nothing to say about it.
-		s.OnChatMessage(B, "!rezz b > c > a", 2000);
+		s.OnChatMessage(B, "!rezzorder b > c > a", 2000);
 		CHECK(lastText().find("you are now") == std::string::npos);
 
 		// Dropped from the order entirely.
-		s.OnChatMessage(B, "!rezz b > c", 3000);
+		s.OnChatMessage(B, "!rezzorder b > c", 3000);
 		CHECK(s.SelfPlace() == 0);
 		CHECK(lastText().find("not in it any more") != std::string::npos);
 
 		// And put back in, through the prompt this time.
 		s.SetShareRules(false, false);
-		s.OnChatMessage(C, "!rezz a > b", 4000);
+		s.OnChatMessage(C, "!rezzorder a > b", 4000);
 		Rezz::SessionView view = s.GetView(4500);
 		CHECK(view.HasShare);
 		CHECK(view.Share.OurPlaceNow == 0 && view.Share.OurPlaceThen == 1);
@@ -845,17 +916,17 @@ namespace
 		s.SetOrder({ A, B });
 
 		// Our own message is the one we just pasted: it must not come back at us.
-		s.OnChatMessage(A, "!rezz b > a", 1000);
+		s.OnChatMessage(A, "!rezzorder b > a", 1000);
 		CHECK(s.Order() == std::vector<std::string>({ A, B }));
 		CHECK(s.TakeNotices().empty());
 
-		s.OnChatMessage(B, "!rezz?", 2000);
+		s.OnChatMessage(B, "?rezzorder", 2000);
 		std::vector<Rezz::Notice> notices = s.TakeNotices();
 		CHECK(notices.size() == 1 && notices[0].Kind == Rezz::NoticeKind::ShareRequested);
 
 		// Nobody can answer a request without an order.
 		Rezz::Session empty;
-		empty.OnChatMessage(B, "!rezz?", 3000);
+		empty.OnChatMessage(B, "?rezzorder", 3000);
 		CHECK(empty.TakeNotices().empty());
 	}
 
@@ -868,7 +939,8 @@ int main()
 		{ "use advances turn and starts cooldown", TestUseAdvancesAndCooldown },
 		{ "cancel does not advance", TestCancelDoesNotAdvance },
 		{ "used without full stop reason", TestUsedWithoutFullStopReason },
-		{ "out of turn continues after user", TestOutOfTurnContinuesAfterUser },
+		{ "out of turn leaves the rotation alone", TestOutOfTurnLeavesTheRotationAlone },
+		{ "out of turn keeps everyone's place", TestOutOfTurnKeepsEveryonesPlace },
 		{ "skip cooldown and downed/dead", TestSkipCooldownAndDowned },
 		{ "nobody ready reports next ready", TestNobodyReadyReportsNextReady },
 		{ "glyph variants share cooldown", TestGlyphVariantsShareCooldown },
@@ -894,6 +966,8 @@ int main()
 		{ "share fits in a chat message", TestShareFitsInAChatMessage },
 		{ "share round trips every squad", TestShareRoundTripsEverySquad },
 		{ "share keeps everyone when it can", TestShareKeepsEveryoneWhenItCan },
+		{ "share carries precast", TestShareCarriesPrecast },
+		{ "shared precast reaches the session", TestSharedPrecastReachesTheSession },
 		{ "share parses what people type", TestShareParsesWhatPeopleType },
 		{ "share resolves against the squad", TestShareResolvesAgainstTheSquad },
 		{ "shared order from a leader is applied", TestSharedOrderFromLeaderIsApplied },

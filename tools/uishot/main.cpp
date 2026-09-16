@@ -161,6 +161,8 @@ namespace
 
 		size_t order = aView.Order.size();
 		size_t max = Settings::Current.OverlayMaxRows > 0 ? static_cast<size_t>(Settings::Current.OverlayMaxRows) : order;
+		// "next up" shows the player who is up on its card and counts "max displayed" for the rows under it.
+		if (aInfo.Layout == "nextup" && Settings::Current.OverlayMaxRows > 0) { max += 1; }
 		size_t expected = std::min(order, max);
 		if (aInfo.Rows.size() != expected)
 		{

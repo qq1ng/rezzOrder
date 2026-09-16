@@ -206,8 +206,8 @@ namespace Notify
 			s_Flash = aStanding;
 			s_FlashMs = aNowMs;
 		}
-		if (aStanding == Standing::Up && Settings::Current.UpBanner) { return "your turn to revive"; }
-		if (aStanding == Standing::Backup && Settings::Current.BackupBanner) { return "you are the backup"; }
+		if (aStanding == Standing::Up && Settings::Current.UpBanner) { return "You're up"; }
+		if (aStanding == Standing::Backup && Settings::Current.BackupBanner) { return "Backup"; }
 		return {};
 	}
 

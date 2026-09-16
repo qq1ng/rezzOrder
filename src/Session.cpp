@@ -402,6 +402,11 @@ namespace Rezz
 		m_OrderFrom.clear();
 	}
 
+	void Session::SetPrecast(std::vector<std::string> aAccounts)
+	{
+		m_Precast = std::move(aAccounts);
+	}
+
 	void Session::SetAnswerRule(AnswerRule aRule)
 	{
 		m_AnswerRule = aRule;
@@ -434,7 +439,7 @@ namespace Rezz
 		std::vector<RosterMember> roster;
 		roster.reserve(m_Roster.size());
 		for (const auto& [account, member] : m_Roster) { roster.push_back(member); }
-		Share::Resolved resolved = Share::Resolve(message.Names, roster);
+		Share::Resolved resolved = Share::Resolve(message.Entries, roster);
 		if (resolved.Accounts.empty()) { return; }
 
 		SquadRole role = SquadRole::Unknown;
@@ -453,13 +458,14 @@ namespace Rezz
 		{
 			int before = SelfPlace();
 			SetOrder(resolved.Accounts);
+			SetPrecast(resolved.Precast);
 			m_OrderFrom = aAccount;
 			m_HasShare = false;
 			Notify(NoticeKind::ShareApplied, aAccount, what + PlaceChange(before));
 			return;
 		}
 
-		m_Share = SharedOrder{ aAccount, role, resolved.Accounts, resolved.Unknown, SelfPlace(), 0, aNowMs };
+		m_Share = SharedOrder{ aAccount, role, resolved.Accounts, resolved.Precast, resolved.Unknown, SelfPlace(), 0, aNowMs };
 		auto mine = std::find(resolved.Accounts.begin(), resolved.Accounts.end(), m_SelfAccount);
 		m_Share.OurPlaceThen = mine == resolved.Accounts.end() ? 0
 			: static_cast<int>(mine - resolved.Accounts.begin()) + 1;
@@ -472,6 +478,7 @@ namespace Rezz
 		if (!m_HasShare) { return; }
 		int before = SelfPlace();
 		SetOrder(m_Share.Accounts);
+		SetPrecast(m_Share.Precast);
 		m_OrderFrom = m_Share.From;
 		m_HasShare = false;
 		Notify(NoticeKind::ShareApplied, m_Share.From, "using " + DisplayAccount(m_Share.From) + "'s revive order (" +
@@ -506,6 +513,7 @@ namespace Rezz
 		view.Turn = m_Tracker.GetTurn(aNowMs);
 		view.BackupIndex = view.Turn.BackupIndex;
 		view.Order = m_Tracker.Order();
+		view.Precast = m_Precast;
 		view.SelfAccount = m_SelfAccount;
 		view.SquadInCombat = m_CombatSinceMs != 0;
 		view.NowMs = aNowMs;

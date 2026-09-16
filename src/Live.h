@@ -20,6 +20,7 @@ namespace Live
 
 	void Tick();
 	void SetOrder(const std::vector<std::string>& aAccounts);
+	void SetPrecast(const std::vector<std::string>& aAccounts);
 	// Who may set our order by sharing one in squad chat.
 	void SetShareRules(bool aFromLeaders, bool aFromAnyone);
 	void SetAnswerRule(int aRule);

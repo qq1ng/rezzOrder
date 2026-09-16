@@ -12,19 +12,21 @@ namespace Shots
 	{
 		// The squad the mockups used, so the drawings and the real renders can be compared side by side.
 		// account, character, profession, elite specialization
+		// Invented names, capitalised the way the game requires and within its 19-character limit. Nothing
+		// here is a real player: these screenshots end up in the README.
 		const Player kRoster[] = {
-			{ ":Sleeplxss.4127", "Sleeplxss",  7, 73 }, // Mesmer / Troubadour
-			{ ":Gorath.5076",    "Gorath",     6, 80 }, // Elementalist / Catalyst
-			{ ":Magaton.2081",   "Magaton",    6, 56 }, // Elementalist / Tempest
-			{ ":murako.9143",    "murako",     7, 59 }, // Mesmer / Chronomancer
-			{ ":Moister.3388",   "Moister",    4, 55 }, // Ranger / Druid
-			{ ":Sairana.6610",   "Sairana",    2, 61 }, // Warrior / Berserker
-			{ ":Trubbi.1174",    "Trubbi",     8, 34 }, // Necromancer / Reaper
-			{ ":Vivi Prin.7752", "Vivi Prin",  1, 62 }, // Guardian / Firebrand
-			{ ":Enodis.5519",    "Enodis",     4, 72 }, // Ranger / Soulbeast
+			{ ":Sereth.4127",   "Sereth Vale",     7, 73 }, // Mesmer / Troubadour
+			{ ":Kalden.5076",   "Kalden Roth",     6, 80 }, // Elementalist / Catalyst
+			{ ":Maryth.2081",   "Maryth Solane",   6, 56 }, // Elementalist / Tempest
+			{ ":Orrin.9143",    "Orrin Kade",      7, 59 }, // Mesmer / Chronomancer
+			{ ":Brisa.3388",    "Brisa Thornwood", 4, 55 }, // Ranger / Druid
+			{ ":Halvor.6610",   "Halvor Stane",    2, 61 }, // Warrior / Berserker
+			{ ":Nessa.1174",    "Nessa Grimm",     8, 34 }, // Necromancer / Reaper
+			{ ":Edric.7752",    "Edric Lumen",     1, 62 }, // Guardian / Firebrand
+			{ ":Tamsin.5519",   "Tamsin Ward",     4, 72 }, // Ranger / Soulbeast
 		};
 
-		constexpr size_t kSelfIndex = 3; // we play murako, 4th in the order
+		constexpr size_t kSelfIndex = 3; // we play Orrin Kade, 4th in the order
 
 		std::vector<std::string> Accounts(size_t aCount)
 		{
@@ -56,8 +58,8 @@ namespace Shots
 		Rezz::SessionView Mixed()
 		{
 			Squad squad = Base();
-			squad.Used(Account(2), 27000);  // Magaton: 90 s glyph, ~63 s left
-			squad.Used(Account(4), 92000);  // Moister: 120 s spirit, ~28 s left
+			squad.Used(Account(2), 27000);  // Maryth: 90 s glyph, ~63 s left
+			squad.Used(Account(4), 92000);  // Brisa: 120 s spirit, ~28 s left
 			squad.Downed(Account(3));       // us
 			return squad.View();
 		}
@@ -135,12 +137,12 @@ namespace Shots
 			return squad.View();
 		}
 
-		// Somebody typed "!rezz?" in squad chat and we are the one with an order.
+		// Somebody typed "?rezzorder" in squad chat and we are the one with an order.
 		Rezz::SessionView OrderAsked()
 		{
 			Squad squad = Base();
 			squad.Used(Account(2), 27000);
-			squad.Session().OnChatMessage(Account(4), "!rezz?", kNowMs);
+			squad.Session().OnChatMessage(Account(4), "?rezzorder", kNowMs);
 			return squad.View();
 		}
 
@@ -150,7 +152,7 @@ namespace Shots
 			Squad squad = Base();
 			squad.Order({ Account(0), Account(1), Account(2), Account(3), Account(4) });
 			squad.Used(Account(2), 27000);
-			squad.Session().OnChatMessage(Account(5), "!rezz?", kNowMs);
+			squad.Session().OnChatMessage(Account(5), "?rezzorder", kNowMs);
 			return squad.View();
 		}
 
@@ -159,7 +161,7 @@ namespace Shots
 		{
 			Squad squad = Base();
 			squad.Role(Account(0), Rezz::SquadRole::Member);
-			squad.Session().OnChatMessage(Account(0), "!rezz Sairana > Gorath > murako > Moister", 600000);
+			squad.Session().OnChatMessage(Account(0), "!rezzorder Halvor > Kalden > Orrin* > Brisa", 600000);
 			return squad.View();
 		}
 
@@ -167,7 +169,7 @@ namespace Shots
 		// so these shots also check that the demo plays out the way it is written.
 		Rezz::SessionView DemoAt(uint64_t aIntoS)
 		{
-			Rezz::Demo::Start(":murako.9143", kNowMs - aIntoS * 1000);
+			Rezz::Demo::Start(":Orrin.9143", kNowMs - aIntoS * 1000);
 			return Rezz::Demo::View(kNowMs);
 		}
 
@@ -212,7 +214,7 @@ namespace Shots
 				[](Settings::Values& s) { Layout(s, L::Bars); }, [] {
 					Squad squad = Base();
 					squad.Used(Account(0), 10000);
-					squad.Used(Account(1), 8000); // the turn sits on Magaton and we are next
+					squad.Used(Account(1), 8000); // the turn sits on Maryth and we are next
 					return squad.View();
 				} });
 			// The longest a character name can be is 19 characters; Edge of the Mists rank names ("Diamond
@@ -221,15 +223,32 @@ namespace Shots
 				[](Settings::Values& s)
 				{
 					Layout(s, L::Bars);
-					s.Nicknames[":Sairana.6610"] = "Bartholomew Quickfi"; // 19
-					s.Nicknames[":Magaton.2081"] = "Diamond Scout";       // a WvW rank, as in Edge of the Mists
+					s.Nicknames[":Halvor.6610"] = "Bartholomew Quickfi"; // 19
+					s.Nicknames[":Maryth.2081"] = "Diamond Scout";       // a WvW rank, as in Edge of the Mists
 				}, Mixed });
 			list.push_back({ "bars-long-nickname", "big bars: a nickname longer than any real name",
 				[](Settings::Values& s)
 				{
 					Layout(s, L::Bars);
-					s.Nicknames[":Sairana.6610"] = "the one who always runs in first";
+					s.Nicknames[":Halvor.6610"] = "the one who always runs in first";
 				}, Mixed });
+			// "next up": the card, the backup under it, and however many more were asked for.
+			list.push_back({ "nextup-someone-else", "next up: the card, the backup, then the next few",
+				[](Settings::Values& s) { Layout(s, L::NextUp); s.OverlayMaxRows = 3; }, Mixed });
+			list.push_back({ "nextup-your-turn", "next up: our turn, with the backup right below",
+				[](Settings::Values& s) { Layout(s, L::NextUp); s.OverlayMaxRows = 3; }, OurTurn });
+			list.push_back({ "nextup-all", "next up with no limit: everybody, rolled to the turn",
+				[](Settings::Values& s) { Layout(s, L::NextUp); }, NinePlayers });
+
+			// Precast players are marked with the same star the chat line uses.
+			list.push_back({ "compact-precast", "two players marked as free to cast early",
+				[](Settings::Values& s) { Layout(s, L::Compact); }, [] {
+					Squad squad = Base();
+					squad.Used(Account(2), 27000);
+					Rezz::SessionView view = squad.View();
+					view.Precast = { Account(1), Account(4) };
+					return view;
+				} });
 			list.push_back({ "compact-empty", "no order yet: the window still shows",
 				[](Settings::Values& s) { Layout(s, L::Compact); }, Empty });
 			list.push_back({ "compact-only-us", "an order with just us in it",
@@ -254,7 +273,7 @@ namespace Shots
 				[](Settings::Values& s) { Layout(s, L::Focus); }, [] {
 					Squad squad = Base();
 					squad.Used(Account(0), 10000);
-					squad.Used(Account(1), 8000); // the turn is on Magaton, and we are next after them
+					squad.Used(Account(1), 8000); // the turn sits on Maryth and we are next after them
 					return squad.View();
 				} });
 			list.push_back({ "focus-nobody-ready-wide", "focus card with a width set by hand",
@@ -275,7 +294,7 @@ namespace Shots
 				[] {
 					Squad squad = Base();
 					squad.Used(Account(0), 10000);
-					squad.Used(Account(1), 8000); // the turn sits on Magaton and we are next
+					squad.Used(Account(1), 8000); // the turn sits on Maryth and we are next
 					return squad.View();
 				}, Scenario::Window::Screen });
 			list.push_back({ "share-request", "someone asked the squad for the order",

@@ -82,6 +82,15 @@ namespace Rezz
 		const ReviveSkill* info = FindReviveSkill(aSkillId);
 		if (info == nullptr || !info->IsPlayerCast || aAccount.empty()) { return; }
 
+		// Whose turn it was at the moment of the cast, worked out before the skill is marked spent (which
+		// would take the caster out of the running).
+		bool wasUp = false;
+		if (std::find(m_Order.begin(), m_Order.end(), aAccount) != m_Order.end())
+		{
+			TurnView before = GetTurn(aTimeMs);
+			wasUp = before.UpIndex >= 0 && before.Rows[before.UpIndex].Account == aAccount;
+		}
+
 		SkillStatus& skill = GetSkill(GetPlayer(aAccount), info->Group);
 		if (!CountsAsUsed(*info, aStopReason, aBaseMs))
 		{
@@ -97,10 +106,10 @@ namespace Rezz
 		skill.State = SkillState::Cooldown;
 		skill.LastRevived = 0;
 
-		if (std::find(m_Order.begin(), m_Order.end(), aAccount) != m_Order.end())
-		{
-			m_LastOrderedUser = aAccount;
-		}
+		// Only the player whose turn it was moves the rotation on. Somebody casting out of turn spends their
+		// own skill and nothing else: the people ahead of them keep their place, which is the whole point of
+		// having agreed an order.
+		if (wasUp) { m_LastOrderedUser = aAccount; }
 
 		// The spirit's slams do the reviving; its cast only starts the cooldown.
 		if (info->Group != ReviveGroup::SpiritOfNature) { AddRevive(aTimeMs, aAccount, *info); }
