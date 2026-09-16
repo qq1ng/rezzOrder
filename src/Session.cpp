@@ -312,6 +312,7 @@ namespace Rezz
 		if (!member.OnMap) { m_Tracker.MarkSeenSince(aNowMs, account); }
 		member.LastEventMs = aNowMs;
 		uint32_t previousProfession = member.Profession;
+		std::string previousCharacter = member.Character;
 		member.Character = aUpdate.Character;
 		if (aUpdate.Profession != 0) { member.Profession = aUpdate.Profession; }
 		member.Elite = aUpdate.Elite;
@@ -320,16 +321,28 @@ namespace Rezz
 		m_Tracker.SetAway(aNowMs, account, false);
 		std::erase_if(m_PendingLeaves, [&](const PendingLeave& aLeave) { return aLeave.Account == account; });
 
-		bool changed = previousProfession != 0 && aUpdate.Profession != 0 && previousProfession != aUpdate.Profession;
+		bool swappedProfession = previousProfession != 0 && aUpdate.Profession != 0 && previousProfession != aUpdate.Profession;
+		// Another character of the same profession is still another skill bar. Placeholder names are never
+		// compared: Edge of the Mists reports WvW ranks instead of character names, and everybody on the map
+		// would look like they had just swapped.
+		bool swappedCharacter = !swappedProfession && previousCharacter != member.Character &&
+			IsUsableCharacterName(previousCharacter) && IsUsableCharacterName(member.Character);
+		bool changed = swappedProfession || swappedCharacter;
 		if (changed) { m_Tracker.ForgetSkills(account); member.SeenGroups = 0; }
 		if (isSelf || !InOrder(account)) { m_Reported.erase(account); return; }
 
 		if (changed)
 		{
-			// A different profession is a different skill bar: the old revive skill state no longer applies.
-			std::string text = Named(account) + " swapped to " + ProfessionShortName(member.Profession);
+			// A different skill bar means the old revive skill state no longer applies, and there is no
+			// telling whether the new one even carries a revive skill. They come out and can be added back.
+			int standing = SelfStanding(aNowMs);
+			std::string text = Named(account) + (swappedProfession
+				? " swapped to " + std::string(ProfessionShortName(member.Profession))
+				: " swapped character");
 			if (!IsReviveProfession(member.Profession)) { text += " (no revive skill)"; }
-			Notify(NoticeKind::ChangedProfession, account, text);
+			DropFromOrder(account);
+			text += ", out of the order";
+			Notify(NoticeKind::ChangedProfession, account, text + StandingChange(standing, SelfStanding(aNowMs)));
 		}
 		else if (m_Reported.count(account))
 		{
@@ -357,13 +370,28 @@ namespace Rezz
 		int standing = SelfStanding(aNowMs);
 		m_Tracker.SetAway(aNowMs, aAccount, true);
 		std::erase_if(m_PendingLeaves, [&](const PendingLeave& aLeave) { return aLeave.Account == aAccount; });
-		if (InOrder(aAccount) && !m_Reported.count(aAccount))
+		if (InOrder(aAccount))
 		{
+			// Their place is part of the message, so it is read off before they lose it.
+			std::string name = Named(aAccount);
+			bool report = !m_Reported.count(aAccount);
+			DropFromOrder(aAccount);
 			// Somebody ahead of us dropping out is how the turn reaches us without anyone casting.
-			Notify(NoticeKind::LeftSquad, aAccount, Named(aAccount) + " left the squad" +
-				StandingChange(standing, SelfStanding(aNowMs)));
-			m_Reported[aAccount] = true;
+			if (report)
+			{
+				Notify(NoticeKind::LeftSquad, aAccount, name + " left the squad, out of the order" +
+					StandingChange(standing, SelfStanding(aNowMs)));
+				m_Reported[aAccount] = true;
+			}
 		}
+	}
+
+	void Session::DropFromOrder(const std::string& aAccount)
+	{
+		// Not SetOrder: that treats any change as a new order and starts the rotation again, which would move
+		// everyone's turn because one person walked away.
+		m_Tracker.RemoveFromOrder(aAccount);
+		std::erase(m_Precast, aAccount);
 	}
 
 	void Session::OnSelfLeftSquad()

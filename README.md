@@ -50,6 +50,10 @@ instant revive are listed unless you tick *all professions*.
   and their state may be stale.
 - A `*` after a name marks a precast player. See below.
 
+Leaving the squad or swapping to another character takes that player out of the order by itself, and
+everybody still in it keeps their turn. Moving to another map does not: they show as `away` until they are
+back, because they usually are.
+
 ### Customizable
 
 Right-click the window and pick **style**:

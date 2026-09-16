@@ -310,6 +310,13 @@ namespace Shots
 				[](Settings::Values& s) { Layout(s, L::Compact); }, SharedOffer, Scenario::Window::Share });
 			list.push_back({ "editor", "the order editor", [](Settings::Values&) {}, NinePlayers,
 				Scenario::Window::Editor });
+			// The star button lights up for the players carrying the mark, so the column reads at a glance.
+			list.push_back({ "editor-precast", "the order editor with two precast players marked",
+				[](Settings::Values&) {}, [] {
+					Rezz::SessionView view = NinePlayers();
+					view.Precast = { Account(1), Account(4) };
+					return view;
+				}, Scenario::Window::Editor });
 			return list;
 		}
 	}

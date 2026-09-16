@@ -85,6 +85,9 @@ namespace Rezz
 
 		// A different order restarts the rotation at the first player; the same order keeps it.
 		void SetOrder(std::vector<std::string> aAccounts);
+		// Takes one player out without restarting the rotation: somebody leaving is not a new order, and the
+		// people still in it keep their turn. Returns whether they were in the order at all.
+		bool RemoveFromOrder(const std::string& aAccount);
 		const std::vector<std::string>& Order() const { return m_Order; }
 
 		void OnCastStart(uint64_t aTimeMs, const std::string& aAccount, uint32_t aSkillId);

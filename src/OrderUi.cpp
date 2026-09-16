@@ -518,7 +518,14 @@ namespace OrderUi
 		bool OverlayContextMenu(const Rezz::SessionView& aView)
 		{
 			if (ShotMenu == -2) { ImGui::OpenPopup("overlay_menu"); PlaceMenuForShot(); }
-			if (!ImGui::BeginPopupContextWindow("overlay_menu")) { return false; }
+			// NoOpenOverItems, or right-clicking a player would open this as well as their own menu, and this
+			// one is drawn last so it would be the one that wins. Rows are items, so they keep their menu and
+			// the empty space around them opens this one.
+			if (!ImGui::BeginPopupContextWindow("overlay_menu",
+				ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
+			{
+				return false;
+			}
 			NoteMenuRect();
 			AddMeItem(aView);
 			AddPlayerMenu(aView);
@@ -721,6 +728,10 @@ namespace OrderUi
 				MoveInOrder(view.Order, aIndex, aIndex + 1);
 			}
 			AddPlayerMenu(view);
+			// Also here, not only on the window menu: the rows can cover the whole window, leaving nowhere to
+			// right-click for it.
+			PresetMenu(view);
+			CopyOrderItem(view);
 			if (ImGui::MenuItem("Open order editor")) { ShowEditor = true; }
 			ImGui::Separator();
 			StyleMenu();
@@ -1662,7 +1673,11 @@ namespace OrderUi
 					ImGui::TextColored(kRed, "(no revive skill)");
 				}
 
-				float right = ImGui::GetWindowContentRegionMax().x - 86;
+				// Room for the five small buttons and the gaps between them, measured rather than guessed so
+				// the row still lines up if the font size changes.
+				const ImGuiStyle& style = ImGui::GetStyle();
+				float button = ImGui::CalcTextSize("N").x + style.FramePadding.x * 2;
+				float right = ImGui::GetWindowContentRegionMax().x - (button * 5 + style.ItemSpacing.x * 4);
 				ImGui::SameLine(right);
 				if (ImGui::SmallButton("N")) { ImGui::OpenPopup("nickname"); }
 				if (ImGui::IsItemHovered()) { ImGui::SetTooltip("nickname"); }
@@ -1681,6 +1696,18 @@ namespace OrderUi
 					if (ImGui::Button("Clear")) { SetNickname(account, ""); ImGui::CloseCurrentPopup(); }
 					ImGui::EndPopup();
 				}
+				ImGui::SameLine();
+				// Lit up while the mark is on, so the order can be read down the column at a glance.
+				bool precast = std::find(aView.Precast.begin(), aView.Precast.end(), account) != aView.Precast.end();
+				if (precast) { ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.58f, 0.46f, 0.10f, 1.0f)); }
+				if (ImGui::SmallButton("*")) { TogglePrecast(aView, account); }
+				if (precast) { ImGui::PopStyleColor(); }
+				if (ImGui::IsItemHovered())
+				{
+					ImGui::SetTooltip("%s", "May cast early (precast). They spend their revive when they see it "
+						"coming, instead of waiting for their turn.");
+				}
+
 				ImGui::SameLine();
 				if (ImGui::SmallButton("^") && i > 0) { std::swap(order[i], order[i - 1]); changed = true; }
 				ImGui::SameLine();

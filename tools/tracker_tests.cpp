@@ -417,6 +417,85 @@ namespace
 		CHECK(CountNotices(s.TakeNotices(), Rezz::NoticeKind::LeftMap) == 0);
 	}
 
+	// Taking somebody out of the order is not the same as being handed a new one: the players still in it
+	// keep whose turn it is, including when the one who leaves is the player who cast last.
+	void TestRemovingFromOrderKeepsTheTurn()
+	{
+		const std::string P[5] = { ":1.1", ":2.2", ":3.3", ":4.4", ":5.5" };
+		Rezz::Tracker t;
+		t.SetOrder({ P[0], P[1], P[2], P[3], P[4] });
+		Use(t, 1000, P[0], IOL, 1300);
+		Use(t, 3000, P[1], IOL, 1300);
+		CHECK(Up(t, 5000) == P[2]);
+
+		// Somebody further down the order goes: nobody else moves.
+		CHECK(t.RemoveFromOrder(P[4]));
+		CHECK(Up(t, 5000) == P[2]);
+
+		// The player who cast last goes: the rotation must not jump back to the top.
+		CHECK(t.RemoveFromOrder(P[1]));
+		CHECK(t.Order() == std::vector<std::string>({ P[0], P[2], P[3] }));
+		CHECK(Up(t, 5000) == P[2]);
+
+		// And it carries on from there as usual.
+		Use(t, 6000, P[2], IOL, 1300);
+		CHECK(Up(t, 7000) == P[3]);
+
+		CHECK(!t.RemoveFromOrder(P[1])); // already gone
+	}
+
+	void TestLeavingTheSquadDropsFromTheOrder()
+	{
+		Rezz::Session s;
+		s.OnAgentUpdate(Agent(":me.1", 1, 1, 7, true, true), 0);
+		s.OnAgentUpdate(Agent(A, 100, 10, 2, true), 0);
+		s.OnAgentUpdate(Agent(B, 200, 20, 4, true), 0);
+		s.SetOrder({ A, B, ":me.1" });
+		s.SetPrecast({ A });
+		s.OnRole(A, Rezz::SquadRole::Member, 1, 1000);
+		s.OnRole(B, Rezz::SquadRole::Member, 1, 1000);
+		s.TakeNotices();
+
+		s.OnRole(A, Rezz::SquadRole::None, 0, 2000);
+		std::vector<Rezz::Notice> notices = s.TakeNotices();
+		CHECK(notices.size() == 1 && notices[0].Kind == Rezz::NoticeKind::LeftSquad);
+		Rezz::SessionView view = s.GetView(3000);
+		CHECK(view.Order == std::vector<std::string>({ B, ":me.1" }));
+		CHECK(view.Precast.empty()); // they were a precast player, and that goes with them
+	}
+
+	void TestSwappingCharacterDropsFromTheOrder()
+	{
+		auto named = [](const std::string& aAccount, uint64_t aId, uint16_t aInst, uint32_t aProfession,
+			const char* aCharacter)
+		{
+			ArcDps::EvAgentUpdate update = Agent(aAccount, aId, aInst, aProfession, true);
+			strncpy_s(update.Character, aCharacter, _TRUNCATE);
+			return update;
+		};
+
+		Rezz::Session s;
+		s.OnAgentUpdate(Agent(":me.1", 1, 1, 7, true, true), 0);
+		s.OnAgentUpdate(named(A, 100, 10, 2, "Gorath Blade"), 0);
+		s.OnAgentUpdate(named(B, 200, 20, 4, "Bryn Fletcher"), 0);
+		s.SetOrder({ A, B, ":me.1" });
+		s.OnRole(A, Rezz::SquadRole::Member, 1, 0);
+		s.OnRole(B, Rezz::SquadRole::Member, 1, 0);
+		s.TakeNotices();
+
+		// Same account and same profession, but another character: still another skill bar.
+		s.OnAgentUpdate(named(A, 101, 11, 2, "Gorath Ember"), 5000);
+		std::vector<Rezz::Notice> notices = s.TakeNotices();
+		CHECK(notices.size() == 1 && notices[0].Kind == Rezz::NoticeKind::ChangedProfession);
+		CHECK(s.GetView(6000).Order == std::vector<std::string>({ B, ":me.1" }));
+
+		// A rank name standing in for a character name is not a swap: in Edge of the Mists everybody on the
+		// map would look like they had just changed character.
+		s.OnAgentUpdate(named(B, 201, 21, 4, "Diamond Legend"), 7000);
+		CHECK(s.TakeNotices().empty());
+		CHECK(s.GetView(8000).Order == std::vector<std::string>({ B, ":me.1" }));
+	}
+
 	void TestReadyIsUnconfirmedUntilWatched()
 	{
 		Rezz::Tracker t;
@@ -881,7 +960,10 @@ namespace
 		std::string text = lastText();
 		CHECK(text.find("left the squad") != std::string::npos);
 		CHECK(text.find("you are up now") != std::string::npos);
-		CHECK(s.GetView(3500).Turn.Rows[2].Account == A);
+		// Both of them are out of the order now, so we are all that is left of it.
+		Rezz::SessionView view = s.GetView(3500);
+		CHECK(view.Order == std::vector<std::string>({ A }));
+		CHECK(view.Turn.UpIndex == 0 && view.Turn.Rows[0].Account == A);
 	}
 
 	// Somebody behind us leaving changes nothing about our turn, and the notice stays quiet about it.
@@ -1000,6 +1082,9 @@ int main()
 		{ "share fits in a chat message", TestShareFitsInAChatMessage },
 		{ "share round trips every squad", TestShareRoundTripsEverySquad },
 		{ "share keeps everyone when it can", TestShareKeepsEveryoneWhenItCan },
+		{ "removing from the order keeps the turn", TestRemovingFromOrderKeepsTheTurn },
+		{ "leaving the squad drops from the order", TestLeavingTheSquadDropsFromTheOrder },
+		{ "swapping character drops from the order", TestSwappingCharacterDropsFromTheOrder },
 		{ "share carries precast", TestShareCarriesPrecast },
 		{ "share ignores abusive lines", TestShareIgnoresAbusiveLines },
 		{ "shared precast reaches the session", TestSharedPrecastReachesTheSession },

@@ -35,6 +35,21 @@ namespace Rezz
 		m_Order = std::move(aAccounts);
 	}
 
+	bool Tracker::RemoveFromOrder(const std::string& aAccount)
+	{
+		auto it = std::find(m_Order.begin(), m_Order.end(), aAccount);
+		if (it == m_Order.end()) { return false; }
+
+		// GetTurn scans from whoever cast last, so losing that player would send the rotation back to the top.
+		// Handing the marker to the player in front of them leaves the scan starting where it already was.
+		if (aAccount == m_LastOrderedUser)
+		{
+			m_LastOrderedUser = it == m_Order.begin() ? std::string() : *(it - 1);
+		}
+		m_Order.erase(it);
+		return true;
+	}
+
 	PlayerStatus& Tracker::GetPlayer(const std::string& aAccount)
 	{
 		PlayerStatus& player = m_Players[aAccount];

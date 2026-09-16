@@ -175,6 +175,9 @@ namespace Rezz
 		// " - you are up now" when somebody dropping out of the rotation moved the turn to us.
 		std::string StandingChange(int aBefore, int aAfter) const;
 		void OnSelfLeftSquad();
+		// Somebody in the order is gone for good (left the squad, or swapped to another character). Takes them
+		// out of the order and the precast list, leaving everyone else's turn alone.
+		void DropFromOrder(const std::string& aAccount);
 
 		Tracker                                       m_Tracker;
 		std::unordered_map<std::string, RosterMember> m_Roster;
