@@ -1,0 +1,86 @@
+{{Skill infobox
+| split = pve wvw, pvp
+| description = [[Revival|Revive]] allies with different [[attunement]] effects.
+| facts =
+{{skill fact|linked skill=Fire Attunement |effect|Renewal of Fire |desc=}}
+{{skill fact|linked skill=Water Attunement|effect|Renewal of Water|desc=}}
+{{skill fact|linked skill=Air Attunement |effect|Renewal of Air |desc=}}
+{{skill fact|linked skill=Earth Attunement|effect|Renewal of Earth|desc=}}
+| activation = 2
+| recharge = 90
+| recharge pvp = 135
+| profession = elementalist
+| slot = utility
+| type = glyph
+| hero points = 4
+| training order = 5
+| id = 5573
+| palette id = 285
+}}
+
+== Skills ==
+{| {{STDT|elementalist}}
+{{Slot skill table header}}
+{{Slot skill table row|Renewal of Fire}}
+{{Slot skill table row|Renewal of Water}}
+{{Slot skill table row|Renewal of Air}}
+{{Slot skill table row|Renewal of Earth}}
+|}
+
+== Related [[trait]]s ==
+{{related traits}}
+
+== Notes ==
+* Like all revival skills, this only affects [[downed]] players and can also revive dead [[NPC]]s.
+* The attunement effect is determined at the beginning of activation, attunement swapping does not change the attunement effect.
+* When used underwater, the glyph is a point-blank area of effect skill, instead of ground-targeted.
+* The skill heals downed players for a certain amount, thus if their health is extremely low it will not revive them.
+* This skill lands at the location of the player's cursor at the end of the cast, and can be re-targeted until that point if a player has their ground-targeting behavior set to "Instant Cast" in gamer settings.  This can help account for situations where opposing players may use skills to reposition downstate players, or if downed players move themselves using their available skills.
+{{Anomaly|When selecting a skill to equip, this skill does not have a ground-target indicator despite all 4 terrestrial versions being ground-targeted and other ground-targeted skills having an indicator in the list.}}
+
+== Gallery ==
+<gallery>
+File:Glyph of Renewal render.png|Render
+</gallery>
+
+== Version history ==
+{{Version history table header|elementalist}}
+{{Version history table row|2022-02-28|Elementalist}}
+* Increased cooldown from 90 seconds to 135 seconds in PvP only.
+{{Version history table row|2020-07-07|Elementalist}}
+* This skill will now correctly put all attunement variants on interrupt cooldown when interrupted.
+{{Version history table row|2019-12-03|Elementalist}}
+* Reduced recharge to 90 seconds in all game modes. Lowered casting time from 3.25 seconds to 2 seconds.
+{{Version history table row|2018-03-27|Elementalist}}
+* Reduced the cooldown from 165 seconds to 90 seconds in PvP and WvW.
+{{Version history table row|2016-04-19|Elementalist}}
+* This skill now has new icons for each attunement for better visibility.
+{{Version history table row|2014-05-20|Elementalist}}
+* Fixed an issue that caused this skill to be ground targeted while under water.
+* This skill now revives allies in an area around the player when cast under water. (Exact effect depends on current elemental attunement.)
+{{Version history table row|2013-10-15|Elementalist}}
+* Renewal of Fire: This skill is now ground targeted with a 900 range and a 180 radius.
+* Renewal of Water: This skill is now ground targeted with a 900 range and a 180 radius. Fixed an issue so that it will also fully heal the target that is revived.
+* Renewal of Air: This skill is now ground targeted with a 900 range and a 180 radius. Increased the maximum teleport distance to 900 to match the range of the skill.
+* Renewal of Earth: This skill is now ground targeted with a 900 range and a 360 radius.
+{{Version history table row|2013-08-06|Elementalist}}
+* Improved the readability of this skill so enemies can see it more clearly when players are casting it.
+{{Version history table row|2013-07-23|Elementalist}}
+* Reduced the cast time from 4.25-seconds to 3.25 seconds.
+{{Version history table row|2013-01-28|Elementalist}}
+* Increased this skill's cast time while underwater from 1 second to 3.5 seconds.
+{{Version history table row|2012-10-22|Elementalist}}
+* This skill no longer resurrects dead allies; it only revives downed ones.
+{{Version history table row|2012-10-07|Elementalist}}
+* This skill will now revive downed allies only, not dead ones.
+{{Version history table row|2012-09-14|Elementalist}}
+* Resurrection effects of Earth, Fire, and Water now surround the caster, not the target.
+{{Version history table row|release|r=y}}
+|}
+
+== Trivia ==
+*{{Guild Wars skill}}
+
+[[de:Glyphe der Erneuerung]]
+[[es:Glifo de Renovación]]
+[[fr:Glyphe de Renouveau]]

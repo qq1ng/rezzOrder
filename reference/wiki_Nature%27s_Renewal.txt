@@ -1,0 +1,51 @@
+{{Skill infobox
+| split = pve pvp, wvw
+| description = Your [[Spirit of Nature Renewal|spirit of nature]] slams the ground and creates a blast of vital energy that [[Revival|revives]] nearby [[downed]] allies.
+| facts = 
+{{skill fact|Revive Targets|5|game mode=pve pvp}}{{skill fact|Revive Targets|2|game mode=wvw}}
+{{skill fact|targets|5|game mode=pve pvp}}{{skill fact|targets|2|game mode=wvw}}
+{{skill fact|radius|360}}
+| activation = 0.75
+| profession = ranger
+| slot = elite
+| chain1 = Spirit of Nature
+| chain2 = Nature's Renewal
+| id = 12601
+}}
+
+== Related [[trait]]s ==
+{{related traits}}
+
+== Notes ==
+* If timed right (i.e. activate the [[Spirit of Nature|spirit skill]] just before you are downed) this slam can be used to revive oneself.
+* The resurrection is affected by poison, i.e. a downstate with low health points and poison might not be fully resurrected.
+
+== Version history ==
+{{Version history table header|ranger}}
+{{Version history table row|2026-04-14|Ranger_2}}
+* Reduced the number of revivable targets from 3 to 2 in WvW only.
+{{Version history table row|2025-11-18|Ranger 2}}
+* Reduced the number of revivable targets from 5 to 3 in WvW only.
+{{Version history table row|2023-06-27|Ranger}}
+*  Spirits have been reworked. A spirit will now grant an initial effect when summoned, slam the ground for a secondary effect, and then grant boons to nearby allies for a period of time.
+{{Version history table row|2019-04-23|Ranger}}
+*  Added an additional ring visual effect to indicate the range of the toggle skill.
+{{Version history table row|2019-03-05|Ranger}}
+* Reduced the recharge time of this skill from 120 seconds to 40 seconds. Reduced the radius of the revive pulse and condition-cleansing effect from 600 to 240. Each ally revived by this spirit causes the spirit to lose 30% of its maximum health, but it can still revive up to 5 allies. Reduced the number of conditions that are removed from 5 to 3.
+{{Version history table row|2018-12-11|Ranger}}
+* Fixed a bug in which the [[stability]] granted by the spirit of nature hit fewer targets than intended.
+{{Version history table row|2015-06-24|Ranger}}
+* Fixed a bug that prevented this skill from properly recharging when used.
+{{Version history table row|2015-06-23|Ranger 2}}
+* All ranger spirit's active abilities have had their maximum targets increased to 5.
+* All ranger spirit's active abilities are more potent and sacrifice the spirit.
+* Increased recharge to 120 seconds.
+{{Version history table row|release|r=y}}
+|}
+
+== Trivia ==
+*{{Guild Wars skill}}
+
+[[de:Erneuerung der Natur]]
+[[es:Renovación de la naturaleza]]
+[[fr:Renouveau de la nature]]

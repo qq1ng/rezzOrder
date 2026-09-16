@@ -1,0 +1,1022 @@
+[
+  {
+    "name": "Signet of Mercy",
+    "facts": [
+      {
+        "text": "Range",
+        "type": "Range",
+        "icon": "https://render.guildwars2.com/file/0AAB34BEB1C9F4A25EC612DDBEACF3E20B2810FA/156666.png",
+        "value": 900
+      },
+      {
+        "text": "Recharge",
+        "type": "Recharge",
+        "icon": "https://render.guildwars2.com/file/D767B963D120F077C3B163A05DC05A7317D7DB70/156651.png",
+        "value": 50
+      },
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/9FCB1995DC9106F6A1C9741142D4FF7DB407414F/103667.png",
+        "duration": 0,
+        "status": "Signet of Mercy",
+        "description": "Gain improved concentration.",
+        "apply_count": 1
+      },
+      {
+        "text": "Radius",
+        "type": "Distance",
+        "icon": "https://render.guildwars2.com/file/B0CD8077991E4FB1622D2930337ED7F9B54211D5/156665.png",
+        "distance": 180
+      },
+      {
+        "text": "Number of Allied Targets",
+        "type": "Number",
+        "icon": "https://render.guildwars2.com/file/BBE8191A494B0352259C10EADFDACCE177E6DA5B/1770208.png",
+        "value": 1
+      }
+    ],
+    "description": "Signet Passive: Improves concentration.\nSignet Active: Revive a nearby downed ally.",
+    "icon": "https://render.guildwars2.com/file/9FCB1995DC9106F6A1C9741142D4FF7DB407414F/103667.png",
+    "type": "Utility",
+    "weapon_type": "None",
+    "professions": [
+      "Guardian"
+    ],
+    "slot": "Utility",
+    "flags": [
+      "GroundTargeted"
+    ],
+    "id": 9163,
+    "chat_link": "[&BssjAAA=]",
+    "categories": [
+      "Signet"
+    ],
+    "traited_facts": [
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/9FCB1995DC9106F6A1C9741142D4FF7DB407414F/103667.png",
+        "duration": 0,
+        "status": "Signet of Mercy",
+        "description": "Gain improved concentration.",
+        "apply_count": 1,
+        "requires_trait": 579,
+        "overrides": 2
+      }
+    ]
+  },
+  {
+    "name": "Glyph of Renewal",
+    "facts": [
+      {
+        "text": "Recharge",
+        "type": "Recharge",
+        "icon": "https://render.guildwars2.com/file/D767B963D120F077C3B163A05DC05A7317D7DB70/156651.png",
+        "value": 90
+      }
+    ],
+    "description": "Glyph. Revive allies with different attunement effects.",
+    "icon": "https://render.guildwars2.com/file/E32109BA04DE3CE0F2A8E30324D235910B739BFC/103354.png",
+    "type": "Utility",
+    "weapon_type": "None",
+    "professions": [
+      "Elementalist"
+    ],
+    "slot": "Utility",
+    "flags": [],
+    "id": 5573,
+    "chat_link": "[&BsUVAAA=]",
+    "categories": [
+      "Glyph"
+    ],
+    "subskills": [
+      {
+        "id": 24409,
+        "attunement": "Air"
+      },
+      {
+        "id": 5760,
+        "attunement": "Air"
+      },
+      {
+        "id": 24411,
+        "attunement": "Earth"
+      },
+      {
+        "id": 5761,
+        "attunement": "Earth"
+      },
+      {
+        "id": 24407,
+        "attunement": "Fire"
+      },
+      {
+        "id": 5762,
+        "attunement": "Fire"
+      },
+      {
+        "id": 24410,
+        "attunement": "Water"
+      },
+      {
+        "id": 5763,
+        "attunement": "Water"
+      }
+    ]
+  },
+  {
+    "name": "Renewal of Fire",
+    "facts": [
+      {
+        "text": "Range",
+        "type": "Range",
+        "icon": "https://render.guildwars2.com/file/0AAB34BEB1C9F4A25EC612DDBEACF3E20B2810FA/156666.png",
+        "value": 900
+      },
+      {
+        "text": "Recharge",
+        "type": "Recharge",
+        "icon": "https://render.guildwars2.com/file/D767B963D120F077C3B163A05DC05A7317D7DB70/156651.png",
+        "value": 90
+      },
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/3D61BEC4D7F15D070666D7DF355EDC07E4D023A8/1424232.png",
+        "duration": 15,
+        "status": "Renewal of Fire",
+        "description": "Will revive when downed.",
+        "apply_count": 1
+      },
+      {
+        "text": "Revive Targets",
+        "type": "Number",
+        "icon": "https://render.guildwars2.com/file/9352ED3244417304995F26CB01AE76BB7E547052/156661.png",
+        "value": 1
+      },
+      {
+        "text": "Radius",
+        "type": "Distance",
+        "icon": "https://render.guildwars2.com/file/B0CD8077991E4FB1622D2930337ED7F9B54211D5/156665.png",
+        "distance": 180
+      }
+    ],
+    "description": "Glyph. Revive an ally; you're revived the next time you're downed.",
+    "icon": "https://render.guildwars2.com/file/3D61BEC4D7F15D070666D7DF355EDC07E4D023A8/1424232.png",
+    "type": "Utility",
+    "weapon_type": "None",
+    "attunement": "Fire",
+    "professions": [
+      "Elementalist"
+    ],
+    "slot": "Utility",
+    "flags": [
+      "GroundTargeted"
+    ],
+    "id": 5762,
+    "chat_link": "[&BoIWAAA=]",
+    "categories": [
+      "Glyph"
+    ],
+    "traited_facts": [
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/2FA9DF9D6BC17839BBEA14723F1C53D645DDB5E1/102852.png",
+        "duration": 10,
+        "status": "Might",
+        "description": "Increased outgoing damage; stacks intensity.",
+        "apply_count": 1,
+        "requires_trait": 229
+      },
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/2FA9DF9D6BC17839BBEA14723F1C53D645DDB5E1/102852.png",
+        "duration": 6,
+        "status": "Might",
+        "description": "Increased outgoing damage; stacks intensity.",
+        "apply_count": 3,
+        "requires_trait": 229
+      }
+    ]
+  },
+  {
+    "name": "Renewal of Fire",
+    "facts": [
+      {
+        "text": "Recharge",
+        "type": "Recharge",
+        "icon": "https://render.guildwars2.com/file/D767B963D120F077C3B163A05DC05A7317D7DB70/156651.png",
+        "value": 90
+      },
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/3D61BEC4D7F15D070666D7DF355EDC07E4D023A8/1424232.png",
+        "duration": 15,
+        "status": "Renewal of Fire",
+        "description": "Will revive when downed.",
+        "apply_count": 1
+      },
+      {
+        "text": "Revive Targets",
+        "type": "Number",
+        "icon": "https://render.guildwars2.com/file/9352ED3244417304995F26CB01AE76BB7E547052/156661.png",
+        "value": 1
+      },
+      {
+        "text": "Radius",
+        "type": "Distance",
+        "icon": "https://render.guildwars2.com/file/B0CD8077991E4FB1622D2930337ED7F9B54211D5/156665.png",
+        "distance": 240
+      }
+    ],
+    "description": "Glyph. Revive an ally; you're revived the next time you're downed.",
+    "icon": "https://render.guildwars2.com/file/E32109BA04DE3CE0F2A8E30324D235910B739BFC/103354.png",
+    "type": "Utility",
+    "weapon_type": "None",
+    "attunement": "Fire",
+    "professions": [
+      "Elementalist"
+    ],
+    "slot": "Utility",
+    "flags": [],
+    "id": 24407,
+    "chat_link": "[&BldfAAA=]",
+    "categories": [
+      "Glyph"
+    ],
+    "traited_facts": [
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/2FA9DF9D6BC17839BBEA14723F1C53D645DDB5E1/102852.png",
+        "duration": 10,
+        "status": "Might",
+        "description": "Increased outgoing damage; stacks intensity.",
+        "apply_count": 1,
+        "requires_trait": 229
+      },
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/2FA9DF9D6BC17839BBEA14723F1C53D645DDB5E1/102852.png",
+        "duration": 6,
+        "status": "Might",
+        "description": "Increased outgoing damage; stacks intensity.",
+        "apply_count": 3,
+        "requires_trait": 229
+      }
+    ]
+  },
+  {
+    "name": "Renewal of Water",
+    "facts": [
+      {
+        "text": "Range",
+        "type": "Range",
+        "icon": "https://render.guildwars2.com/file/0AAB34BEB1C9F4A25EC612DDBEACF3E20B2810FA/156666.png",
+        "value": 900
+      },
+      {
+        "text": "Recharge",
+        "type": "Recharge",
+        "icon": "https://render.guildwars2.com/file/D767B963D120F077C3B163A05DC05A7317D7DB70/156651.png",
+        "value": 90
+      },
+      {
+        "text": "Healing",
+        "type": "Percent",
+        "icon": "https://render.guildwars2.com/file/D4347C52157B040943051D7E09DEAD7AF63D4378/156662.png",
+        "percent": 100
+      },
+      {
+        "text": "Revive Targets",
+        "type": "Number",
+        "icon": "https://render.guildwars2.com/file/9352ED3244417304995F26CB01AE76BB7E547052/156661.png",
+        "value": 1
+      },
+      {
+        "text": "Radius",
+        "type": "Distance",
+        "icon": "https://render.guildwars2.com/file/B0CD8077991E4FB1622D2930337ED7F9B54211D5/156665.png",
+        "distance": 180
+      }
+    ],
+    "description": "Glyph. Revive an ally with full health.",
+    "icon": "https://render.guildwars2.com/file/FDC93071A89BCE04071812A9B2EFFB97F8B1C3DE/1424233.png",
+    "type": "Utility",
+    "weapon_type": "None",
+    "attunement": "Water",
+    "professions": [
+      "Elementalist"
+    ],
+    "slot": "Utility",
+    "flags": [
+      "GroundTargeted"
+    ],
+    "id": 5763,
+    "chat_link": "[&BoMWAAA=]",
+    "categories": [
+      "Glyph"
+    ],
+    "traited_facts": [
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/F69996772B9E18FD18AD0AABAB25D7E3FC42F261/102835.png",
+        "duration": 10,
+        "status": "Regeneration",
+        "description": "Gain health every second; stacks duration.",
+        "apply_count": 1,
+        "requires_trait": 229
+      },
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/F69996772B9E18FD18AD0AABAB25D7E3FC42F261/102835.png",
+        "duration": 5,
+        "status": "Regeneration",
+        "description": "Gain health every second; stacks duration.",
+        "apply_count": 1,
+        "requires_trait": 229
+      }
+    ]
+  },
+  {
+    "name": "Renewal of Water",
+    "facts": [
+      {
+        "text": "Recharge",
+        "type": "Recharge",
+        "icon": "https://render.guildwars2.com/file/D767B963D120F077C3B163A05DC05A7317D7DB70/156651.png",
+        "value": 90
+      },
+      {
+        "text": "Healing",
+        "type": "Percent",
+        "icon": "https://render.guildwars2.com/file/D4347C52157B040943051D7E09DEAD7AF63D4378/156662.png",
+        "percent": 100
+      },
+      {
+        "text": "Revive Targets",
+        "type": "Number",
+        "icon": "https://render.guildwars2.com/file/9352ED3244417304995F26CB01AE76BB7E547052/156661.png",
+        "value": 1
+      },
+      {
+        "text": "Radius",
+        "type": "Distance",
+        "icon": "https://render.guildwars2.com/file/B0CD8077991E4FB1622D2930337ED7F9B54211D5/156665.png",
+        "distance": 240
+      }
+    ],
+    "description": "Glyph. Revive an ally with full health.",
+    "icon": "https://render.guildwars2.com/file/E32109BA04DE3CE0F2A8E30324D235910B739BFC/103354.png",
+    "type": "Utility",
+    "weapon_type": "None",
+    "attunement": "Water",
+    "professions": [
+      "Elementalist"
+    ],
+    "slot": "Utility",
+    "flags": [],
+    "id": 24410,
+    "chat_link": "[&BlpfAAA=]",
+    "categories": [
+      "Glyph"
+    ],
+    "traited_facts": [
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/F69996772B9E18FD18AD0AABAB25D7E3FC42F261/102835.png",
+        "duration": 10,
+        "status": "Regeneration",
+        "description": "Gain health every second; stacks duration.",
+        "apply_count": 1,
+        "requires_trait": 229
+      },
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/F69996772B9E18FD18AD0AABAB25D7E3FC42F261/102835.png",
+        "duration": 5,
+        "status": "Regeneration",
+        "description": "Gain health every second; stacks duration.",
+        "apply_count": 1,
+        "requires_trait": 229
+      }
+    ]
+  },
+  {
+    "name": "Renewal of Air",
+    "facts": [
+      {
+        "text": "Range",
+        "type": "Range",
+        "icon": "https://render.guildwars2.com/file/0AAB34BEB1C9F4A25EC612DDBEACF3E20B2810FA/156666.png",
+        "value": 900
+      },
+      {
+        "text": "Recharge",
+        "type": "Recharge",
+        "icon": "https://render.guildwars2.com/file/D767B963D120F077C3B163A05DC05A7317D7DB70/156651.png",
+        "value": 90
+      },
+      {
+        "text": "Revive Targets",
+        "type": "Number",
+        "icon": "https://render.guildwars2.com/file/9352ED3244417304995F26CB01AE76BB7E547052/156661.png",
+        "value": 1
+      },
+      {
+        "text": "Radius",
+        "type": "Distance",
+        "icon": "https://render.guildwars2.com/file/B0CD8077991E4FB1622D2930337ED7F9B54211D5/156665.png",
+        "distance": 180
+      }
+    ],
+    "description": "Glyph. Revive and teleport an ally to your location.",
+    "icon": "https://render.guildwars2.com/file/E30F0C419DB4BD6A09E764442B223AFD4C7F9199/1424230.png",
+    "type": "Utility",
+    "weapon_type": "None",
+    "attunement": "Air",
+    "professions": [
+      "Elementalist"
+    ],
+    "slot": "Utility",
+    "flags": [
+      "GroundTargeted"
+    ],
+    "id": 5760,
+    "chat_link": "[&BoAWAAA=]",
+    "categories": [
+      "Glyph"
+    ],
+    "traited_facts": [
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/20CFC14967E67F7A3FD4A4B8722B4CF5B8565E11/102836.png",
+        "duration": 10,
+        "status": "Swiftness",
+        "description": "Movement speed increased by 33%; stacks duration.",
+        "apply_count": 1,
+        "requires_trait": 229
+      }
+    ]
+  },
+  {
+    "name": "Renewal of Air",
+    "facts": [
+      {
+        "text": "Recharge",
+        "type": "Recharge",
+        "icon": "https://render.guildwars2.com/file/D767B963D120F077C3B163A05DC05A7317D7DB70/156651.png",
+        "value": 90
+      },
+      {
+        "text": "Revive Targets",
+        "type": "Number",
+        "icon": "https://render.guildwars2.com/file/9352ED3244417304995F26CB01AE76BB7E547052/156661.png",
+        "value": 1
+      },
+      {
+        "text": "Radius",
+        "type": "Distance",
+        "icon": "https://render.guildwars2.com/file/B0CD8077991E4FB1622D2930337ED7F9B54211D5/156665.png",
+        "distance": 900
+      }
+    ],
+    "description": "Glyph. Revive and teleport an ally to your location.",
+    "icon": "https://render.guildwars2.com/file/E32109BA04DE3CE0F2A8E30324D235910B739BFC/103354.png",
+    "type": "Utility",
+    "weapon_type": "None",
+    "attunement": "Air",
+    "professions": [
+      "Elementalist"
+    ],
+    "slot": "Utility",
+    "flags": [],
+    "id": 24409,
+    "chat_link": "[&BllfAAA=]",
+    "categories": [
+      "Glyph"
+    ],
+    "traited_facts": [
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/20CFC14967E67F7A3FD4A4B8722B4CF5B8565E11/102836.png",
+        "duration": 10,
+        "status": "Swiftness",
+        "description": "Movement speed increased by 33%; stacks duration.",
+        "apply_count": 1,
+        "requires_trait": 229
+      }
+    ]
+  },
+  {
+    "name": "Renewal of Earth",
+    "facts": [
+      {
+        "text": "Range",
+        "type": "Range",
+        "icon": "https://render.guildwars2.com/file/0AAB34BEB1C9F4A25EC612DDBEACF3E20B2810FA/156666.png",
+        "value": 900
+      },
+      {
+        "text": "Recharge",
+        "type": "Recharge",
+        "icon": "https://render.guildwars2.com/file/D767B963D120F077C3B163A05DC05A7317D7DB70/156651.png",
+        "value": 90
+      },
+      {
+        "text": "Revive Targets",
+        "type": "Number",
+        "icon": "https://render.guildwars2.com/file/9352ED3244417304995F26CB01AE76BB7E547052/156661.png",
+        "value": 3
+      },
+      {
+        "text": "Radius",
+        "type": "Distance",
+        "icon": "https://render.guildwars2.com/file/B0CD8077991E4FB1622D2930337ED7F9B54211D5/156665.png",
+        "distance": 360
+      }
+    ],
+    "description": "Glyph. Revive allies around you.",
+    "icon": "https://render.guildwars2.com/file/044EE81D614E307B80670739F4DAF310C754BDD3/1424231.png",
+    "type": "Utility",
+    "weapon_type": "None",
+    "attunement": "Earth",
+    "professions": [
+      "Elementalist"
+    ],
+    "slot": "Utility",
+    "flags": [
+      "GroundTargeted"
+    ],
+    "id": 5761,
+    "chat_link": "[&BoEWAAA=]",
+    "categories": [
+      "Glyph"
+    ],
+    "traited_facts": [
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/CD77D1FAB7B270223538A8F8ECDA1CFB044D65F4/102834.png",
+        "duration": 3,
+        "status": "Protection",
+        "description": "Incoming strike damage decreased by 33%; stacks duration.",
+        "apply_count": 1,
+        "requires_trait": 229
+      }
+    ]
+  },
+  {
+    "name": "Renewal of Earth",
+    "facts": [
+      {
+        "text": "Recharge",
+        "type": "Recharge",
+        "icon": "https://render.guildwars2.com/file/D767B963D120F077C3B163A05DC05A7317D7DB70/156651.png",
+        "value": 90
+      },
+      {
+        "text": "Revive Targets",
+        "type": "Number",
+        "icon": "https://render.guildwars2.com/file/9352ED3244417304995F26CB01AE76BB7E547052/156661.png",
+        "value": 3
+      },
+      {
+        "text": "Radius",
+        "type": "Distance",
+        "icon": "https://render.guildwars2.com/file/B0CD8077991E4FB1622D2930337ED7F9B54211D5/156665.png",
+        "distance": 480
+      }
+    ],
+    "description": "Glyph. Revive allies around you.",
+    "icon": "https://render.guildwars2.com/file/E32109BA04DE3CE0F2A8E30324D235910B739BFC/103354.png",
+    "type": "Utility",
+    "weapon_type": "None",
+    "attunement": "Earth",
+    "professions": [
+      "Elementalist"
+    ],
+    "slot": "Utility",
+    "flags": [],
+    "id": 24411,
+    "chat_link": "[&BltfAAA=]",
+    "categories": [
+      "Glyph"
+    ],
+    "traited_facts": [
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/CD77D1FAB7B270223538A8F8ECDA1CFB044D65F4/102834.png",
+        "duration": 3,
+        "status": "Protection",
+        "description": "Incoming strike damage decreased by 33%; stacks duration.",
+        "apply_count": 1,
+        "requires_trait": 229
+      }
+    ]
+  },
+  {
+    "name": "Illusion of Life",
+    "facts": [
+      {
+        "text": "Range",
+        "type": "Range",
+        "icon": "https://render.guildwars2.com/file/0AAB34BEB1C9F4A25EC612DDBEACF3E20B2810FA/156666.png",
+        "value": 1200
+      },
+      {
+        "text": "Recharge",
+        "type": "Recharge",
+        "icon": "https://render.guildwars2.com/file/D767B963D120F077C3B163A05DC05A7317D7DB70/156651.png",
+        "value": 75
+      },
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/2D5057DE154D99382F4C6D6E1E6B06CCFEAA7AEF/103754.png",
+        "duration": 15,
+        "status": "Illusion of Life",
+        "description": "You are under the illusion that you are alive.",
+        "apply_count": 1
+      },
+      {
+        "text": "Radius",
+        "type": "Distance",
+        "icon": "https://render.guildwars2.com/file/B0CD8077991E4FB1622D2930337ED7F9B54211D5/156665.png",
+        "distance": 240
+      },
+      {
+        "text": "Prevents Capture-Point Contribution",
+        "type": "NoData",
+        "icon": "https://render.guildwars2.com/file/9352ED3244417304995F26CB01AE76BB7E547052/156661.png"
+      },
+      {
+        "text": "Number of Targets",
+        "type": "Number",
+        "icon": "https://render.guildwars2.com/file/BBE8191A494B0352259C10EADFDACCE177E6DA5B/1770208.png",
+        "value": 3
+      }
+    ],
+    "description": "Manipulation. Give allies Illusion of Life at the target location, allowing them to get up from downed state and keep fighting. Fully revives allies if they kill a foe.",
+    "icon": "https://render.guildwars2.com/file/2D5057DE154D99382F4C6D6E1E6B06CCFEAA7AEF/103754.png",
+    "type": "Utility",
+    "weapon_type": "None",
+    "professions": [
+      "Mesmer"
+    ],
+    "slot": "Utility",
+    "flags": [
+      "GroundTargeted"
+    ],
+    "id": 10244,
+    "chat_link": "[&BgQoAAA=]",
+    "categories": [
+      "Manipulation"
+    ]
+  },
+  {
+    "name": "Signet of Undeath",
+    "facts": [
+      {
+        "text": "Range",
+        "type": "Range",
+        "icon": "https://render.guildwars2.com/file/0AAB34BEB1C9F4A25EC612DDBEACF3E20B2810FA/156666.png",
+        "value": 900
+      },
+      {
+        "text": "Recharge",
+        "type": "Recharge",
+        "icon": "https://render.guildwars2.com/file/D767B963D120F077C3B163A05DC05A7317D7DB70/156651.png",
+        "value": 75
+      },
+      {
+        "text": "Life Force per 3 Seconds",
+        "type": "Percent",
+        "icon": "https://render.guildwars2.com/file/9352ED3244417304995F26CB01AE76BB7E547052/156661.png",
+        "percent": 4
+      },
+      {
+        "text": "Radius",
+        "type": "Distance",
+        "icon": "https://render.guildwars2.com/file/B0CD8077991E4FB1622D2930337ED7F9B54211D5/156665.png",
+        "distance": 180
+      },
+      {
+        "text": "Number of Allied Targets",
+        "type": "Number",
+        "icon": "https://render.guildwars2.com/file/BBE8191A494B0352259C10EADFDACCE177E6DA5B/1770208.png",
+        "value": 1
+      },
+      {
+        "text": "Life Force per 3 Seconds",
+        "type": "Percent",
+        "icon": "https://render.guildwars2.com/file/9352ED3244417304995F26CB01AE76BB7E547052/156661.png",
+        "percent": 2
+      }
+    ],
+    "description": "Signet Passive: Generates life force while in combat.\nSignet Active: Sacrifice health to revive one downed ally in a target area.",
+    "icon": "https://render.guildwars2.com/file/71931FADB11260EDB2770DF23054DC9970D35734/103826.png",
+    "type": "Utility",
+    "weapon_type": "None",
+    "professions": [
+      "Necromancer"
+    ],
+    "slot": "Utility",
+    "flags": [
+      "GroundTargeted"
+    ],
+    "id": 10611,
+    "chat_link": "[&BnMpAAA=]",
+    "categories": [
+      "Signet"
+    ]
+  },
+  {
+    "name": "Battle Standard",
+    "facts": [
+      {
+        "text": "Range",
+        "type": "Range",
+        "icon": "https://render.guildwars2.com/file/0AAB34BEB1C9F4A25EC612DDBEACF3E20B2810FA/156666.png",
+        "value": 600
+      },
+      {
+        "text": "Recharge",
+        "type": "Recharge",
+        "icon": "https://render.guildwars2.com/file/D767B963D120F077C3B163A05DC05A7317D7DB70/156651.png",
+        "value": 90
+      },
+      {
+        "text": "Boon Application Interval",
+        "type": "Time",
+        "icon": "https://render.guildwars2.com/file/B75E91EB22E0DFCC1D08030204055946506D56F6/1770206.png",
+        "duration": 3
+      },
+      {
+        "text": "Combo Finisher",
+        "type": "ComboFinisher",
+        "icon": "https://render.guildwars2.com/file/A513F3653D33FBA4220D2D307799F8A327A36A3B/156656.png",
+        "percent": 100,
+        "finisher_type": "Blast"
+      },
+      {
+        "text": "Damage",
+        "type": "Damage",
+        "icon": "https://render.guildwars2.com/file/61AA4919C4A7990903241B680A69530121E994C7/156657.png",
+        "hit_count": 1,
+        "dmg_multiplier": 4
+      },
+      {
+        "text": "Damage",
+        "type": "Damage",
+        "icon": "https://render.guildwars2.com/file/61AA4919C4A7990903241B680A69530121E994C7/156657.png",
+        "hit_count": 1,
+        "dmg_multiplier": 1.5
+      },
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/2FA9DF9D6BC17839BBEA14723F1C53D645DDB5E1/102852.png",
+        "duration": 12,
+        "status": "Might",
+        "description": "Increased outgoing damage; stacks intensity.",
+        "apply_count": 2
+      },
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/96D90DF84CAFE008233DD1C2606A12C1A0E68048/102842.png",
+        "duration": 6,
+        "status": "Fury",
+        "description": "Critical chance increased; stacks duration.",
+        "apply_count": 1
+      },
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/20CFC14967E67F7A3FD4A4B8722B4CF5B8565E11/102836.png",
+        "duration": 12,
+        "status": "Swiftness",
+        "description": "Movement speed increased by 33%; stacks duration.",
+        "apply_count": 1
+      },
+      {
+        "text": "Duration",
+        "type": "Time",
+        "icon": "https://render.guildwars2.com/file/7B2193ACCF77E56C13E608191B082D68AA0FAA71/156659.png",
+        "duration": 15
+      },
+      {
+        "text": "Effective Radius",
+        "type": "Distance",
+        "icon": "https://render.guildwars2.com/file/B0CD8077991E4FB1622D2930337ED7F9B54211D5/156665.png",
+        "distance": 360
+      },
+      {
+        "text": "Number of Targets",
+        "type": "Number",
+        "icon": "https://render.guildwars2.com/file/BBE8191A494B0352259C10EADFDACCE177E6DA5B/1770208.png",
+        "value": 5
+      },
+      {
+        "text": "Number of Allied Targets",
+        "type": "Number",
+        "icon": "https://render.guildwars2.com/file/BBE8191A494B0352259C10EADFDACCE177E6DA5B/1770208.png",
+        "value": 5
+      },
+      {
+        "text": "Revive Targets",
+        "type": "Number",
+        "icon": "https://render.guildwars2.com/file/9352ED3244417304995F26CB01AE76BB7E547052/156661.png",
+        "value": 5
+      },
+      {
+        "text": "Revive Targets",
+        "type": "Number",
+        "icon": "https://render.guildwars2.com/file/9352ED3244417304995F26CB01AE76BB7E547052/156661.png",
+        "value": 3
+      },
+      {
+        "text": "Finisher Radius",
+        "type": "Distance",
+        "icon": "https://render.guildwars2.com/file/B0CD8077991E4FB1622D2930337ED7F9B54211D5/156665.png",
+        "distance": 180
+      },
+      {
+        "text": "Revival Radius",
+        "type": "Distance",
+        "icon": "https://render.guildwars2.com/file/B0CD8077991E4FB1622D2930337ED7F9B54211D5/156665.png",
+        "distance": 360
+      }
+    ],
+    "description": "Banner. Place a battle standard that revives fallen allies and finishes downed foes. Once placed, the banner periodically grants boons to allies.",
+    "icon": "https://render.guildwars2.com/file/EFA30928146834B9F1F4C2C3E8DE9A446553DF5C/103707.png",
+    "type": "Elite",
+    "weapon_type": "None",
+    "professions": [
+      "Warrior"
+    ],
+    "slot": "Elite",
+    "bundle_skills": [],
+    "flags": [
+      "GroundTargeted"
+    ],
+    "id": 14419,
+    "chat_link": "[&BlM4AAA=]",
+    "categories": [
+      "Banner"
+    ],
+    "traited_facts": [
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/D104A6B9344A2E2096424A3C300E46BC2926E4D7/2440718.png",
+        "duration": 5,
+        "status": "Resolution",
+        "description": "Incoming condition damage decreased by 33%; stacks duration.",
+        "apply_count": 1,
+        "requires_trait": 1484
+      },
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/2FA9DF9D6BC17839BBEA14723F1C53D645DDB5E1/102852.png",
+        "duration": 18,
+        "status": "Might",
+        "description": "Increased outgoing damage; stacks intensity.",
+        "apply_count": 2,
+        "requires_trait": 1484,
+        "overrides": 6
+      },
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/96D90DF84CAFE008233DD1C2606A12C1A0E68048/102842.png",
+        "duration": 9,
+        "status": "Fury",
+        "description": "Critical chance increased; stacks duration.",
+        "apply_count": 1,
+        "requires_trait": 1484,
+        "overrides": 7
+      },
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/20CFC14967E67F7A3FD4A4B8722B4CF5B8565E11/102836.png",
+        "duration": 18,
+        "status": "Swiftness",
+        "description": "Movement speed increased by 33%; stacks duration.",
+        "apply_count": 1,
+        "requires_trait": 1484,
+        "overrides": 8
+      }
+    ]
+  },
+  {
+    "name": "Spirit of Nature",
+    "facts": [
+      {
+        "text": "Range",
+        "type": "Range",
+        "icon": "https://render.guildwars2.com/file/0AAB34BEB1C9F4A25EC612DDBEACF3E20B2810FA/156666.png",
+        "value": 600
+      },
+      {
+        "text": "Recharge",
+        "type": "Recharge",
+        "icon": "https://render.guildwars2.com/file/D767B963D120F077C3B163A05DC05A7317D7DB70/156651.png",
+        "value": 90
+      },
+      {
+        "text": "Conditions Converted to Boons",
+        "type": "Number",
+        "icon": "https://render.guildwars2.com/file/9352ED3244417304995F26CB01AE76BB7E547052/156661.png",
+        "value": 5
+      },
+      {
+        "text": "Apply Buff/Condition",
+        "type": "Buff",
+        "icon": "https://render.guildwars2.com/file/F69996772B9E18FD18AD0AABAB25D7E3FC42F261/102835.png",
+        "duration": 3,
+        "status": "Regeneration",
+        "description": "Gain health every second; stacks duration.",
+        "apply_count": 4
+      },
+      {
+        "text": "Radius",
+        "type": "Distance",
+        "icon": "https://render.guildwars2.com/file/B0CD8077991E4FB1622D2930337ED7F9B54211D5/156665.png",
+        "distance": 360
+      },
+      {
+        "text": "Number of Allied Targets",
+        "type": "Number",
+        "icon": "https://render.guildwars2.com/file/BBE8191A494B0352259C10EADFDACCE177E6DA5B/1770208.png",
+        "value": 5
+      }
+    ],
+    "description": "Spirit. Summon a spirit at a target point and convert conditions on allies into boons. The spirit will slam the ground and then shake, granting boons to nearby allies.",
+    "icon": "https://render.guildwars2.com/file/E23D450D539B92FE0D36DEDF1B2D6010A961E612/104011.png",
+    "type": "Elite",
+    "weapon_type": "None",
+    "professions": [
+      "Ranger"
+    ],
+    "slot": "Elite",
+    "flip_skill": 12601,
+    "flags": [
+      "GroundTargeted"
+    ],
+    "id": 12569,
+    "chat_link": "[&BhkxAAA=]",
+    "categories": [
+      "Spirit"
+    ]
+  },
+  {
+    "name": "Nature's Renewal",
+    "facts": [
+      {
+        "text": "Revive Targets",
+        "type": "Number",
+        "icon": "https://render.guildwars2.com/file/9352ED3244417304995F26CB01AE76BB7E547052/156661.png",
+        "value": 5
+      },
+      {
+        "text": "Number of Targets",
+        "type": "Number",
+        "icon": "https://render.guildwars2.com/file/BBE8191A494B0352259C10EADFDACCE177E6DA5B/1770208.png",
+        "value": 5
+      },
+      {
+        "text": "Radius",
+        "type": "Distance",
+        "icon": "https://render.guildwars2.com/file/B0CD8077991E4FB1622D2930337ED7F9B54211D5/156665.png",
+        "distance": 360
+      }
+    ],
+    "description": "Your spirit of nature slams the ground and creates a blast of vital energy that revives nearby downed allies.",
+    "icon": "https://render.guildwars2.com/file/1D55D34FB4EE20B1962E315245E40CA5E1042D0E/62248.png",
+    "type": "Elite",
+    "weapon_type": "None",
+    "professions": [
+      "Ranger"
+    ],
+    "slot": "Elite",
+    "flags": [],
+    "id": 12601,
+    "chat_link": "[&BjkxAAA=]"
+  }
+]

@@ -1,0 +1,60 @@
+{{Skill infobox
+| split = pve, wvw, pvp
+| description = {{Skill type|Signet Passive|:}} Improves [[concentration]].<br>{{Skill type|Signet Active|:}} [[Revival|Revive]] a nearby downed ally.
+| facts = {{skill fact|effect|Signet of Mercy (effect)|alt=Signet Passive|desc=120 [[Concentration]]|effect bonus=Concentration}}{{skill fact|allied targets|1}}{{skill fact|radius|180}}{{skill fact|range|900}}
+| activation = 2
+| recharge = 50
+| recharge wvw = 90
+| recharge pvp = 135
+| ground target = circle
+| profession = guardian
+| slot = utility
+| type = signet
+| hero points = 4
+| training order = 5
+| id = 9163,9243
+| palette id = 306
+| gallery1 = Signet of Mercy (overhead icon).png
+| gallery1-text = Overhead activation icon
+}}
+== Mechanics ==
+* The [[range|radius]] for [[revive| revival]] underwater is 240 units around the guardian.
+* The skill [[revival|revives]] other allied characters from the [[Downed]] state only, and not the [[Defeated]] state. Defeated [[NPC]] allies can be resurrected.
+* The skill may fail to revive a downed ally if they are [[poisoned]] and below a certain health threshold.
+* If this skill successfully revives an ally it will activate {{item icon|Relic of Mercy}} if it is equipped.
+
+== Related [[trait]]s ==
+{{related traits}}
+
+== Version history ==
+{{Version history table header|guardian}}
+{{Version history table row|2022-06-28|Guardian}}
+* Cooldown reduced from 90 seconds to 50 seconds in PvE only.
+{{Version history table row|2022-02-28|Guardian}}
+* Increased cooldown from 90 seconds to 135 seconds in PvP only.
+{{Version history table row|2019-12-03|Guardian}}
+* Reduced recharge to 90 seconds in all game modes. Changed the passive effect from granting 180 healing power (216 when traited) to granting 120 concentration (150 when traited).
+{{Version history table row|2018-03-27|Guardian}}
+* Reduced the cooldown from 150 seconds to 90 seconds in PvP and WvW.
+{{Version history table row|2017-05-16|Guardian}}
+* Reduced the casting time of this skill from 3 seconds to 2 seconds.
+{{Version history table row|2016-07-26|Guardian}}
+* The casting time of this skill has been reduced from 3.75 seconds to 3 seconds.
+* The aftercast has been reduced by 0.25 seconds.
+{{Version history table row|2014-05-20|Guardian}}
+* Fixed an issue that caused this skill to be ground targeted while under water.
+* This skill can now revive an ally in an area around the player (radius of 240) while under water.
+{{Version history table row|2013-10-15|Guardian}}
+* This skill is now ground targeted with a 900 range and a 180 radius.
+{{Version history table row|2013-08-20|Guardian}}
+* Added a passive skill fact that is also updated when traited with Perfect Inscriptions.
+{{Version history table row|2013-06-25|Guardian}}
+* Reduced the cooldown to 150 seconds.
+{{Version history table row|2013-04-30|Guardian}}
+* Increased passive stat bonus by 100%.
+{{Version history table row|release|r=y}}
+|}
+
+[[de:Siegel der Gnade]]
+[[es:Sello de compasión]]
+[[fr:Signe de miséricorde]]

@@ -1,0 +1,122 @@
+{{Skill infobox
+| split = pve, wvw, pvp
+| description = Place a battle standard that [[Revival|revives]] fallen allies and [[Finisher|finishes]] [[downed]] foes. Once placed, the banner periodically grants boons to allies.	
+| facts =
+{{skill fact|damage|weapon=utility|coefficient=4.0|game mode=pve}}{{skill fact|damage|weapon=utility|coefficient=1.5|game mode=wvw pvp}}
+{{skill fact|Revive Targets|5|game mode=pve pvp}} {{skill fact|Revive Targets|3|game mode=wvw}}
+{{skill fact|might|12|stacks=2}}
+{{skill fact|fury|6|25|game mode=pve}}{{skill fact|fury|6|game mode=wvw pvp}}
+{{skill fact|swiftness|12}}
+{{skill fact|interval|alt=Boon Application Interval|3}}
+{{skill fact|targets|5}}
+{{skill fact|allied targets|5}}
+{{skill fact|duration|15}}
+{{skill fact|radius|alt=Effective Radius|360}}
+{{skill fact|radius|alt=Finisher Radius|180}}
+{{skill fact|radius|alt=Revival Radius|360}}
+{{skill fact|combo|blast}}
+{{skill fact|range|600}}
+| activation = 2
+| recharge = 90
+| recharge wvw = 120
+| recharge pvp = 120
+| profession = warrior
+| slot = elite
+| type = banner
+| hero points = 9
+| ground target = circle
+| summons = Battle Standard (bundle)
+| training order = 5
+| uw replaced by = Battle Standard (underwater)
+| id = 14419
+| palette id = 238
+}}
+
+== Mechanics ==
+;Revive and finisher
+* Players can be revived from [[downed]] state only, most [[NPC]]s can be revived from defeat.
+* Because the banner has a short travel time when it falls from the air after cast completion, it can also revive the caster if timed perfectly.
+* The revive technically heals players for 100% of their total down state health and 100% of their normal health.
+** Through debuffs (such as [[Poisoned]] and/or [[Agony]]), the banner's revival capabilities can be negated to the point that the affected player will not revive at all, and only regain a portion of their downed health. 
+** This is a common issue in fractals, as higher level fractals can cause players to have multiple stacks of agony, thus nullifying the effects completely.
+* The banner doesn't finish foes if they are invisible.
+
+; Boons
+* The first application happens when the banner is summoned.
+* The banner will then reapply the [[boon]]s every 3 seconds for its duration.
+* This means a total of 6 applications, for a total of 36 seconds of {{fury}} and 72 seconds of {{swiftness}}. 12 stacks of {{might}} will be applied, with varying total stacks over the duration.
+
+== Related [[trait]]s ==
+{{related traits}}
+
+== Version history ==
+{{Version history table header|warrior}}
+{{Version history table row|2026-02-24|Warrior}}
+* Fixed a graphics error in the targeting decal for [[Battle Standard]], [[Banner of Strength]], and [[Banner of Discipline]].
+{{Version history table row|2025-11-18|Warrior}}
+* Reduced the number of revivable targets from 5 to 3 in WvW only.
+{{Version history table row|2024-06-25|Warrior}}
+* Reduced the cooldown from 120 seconds to 90 seconds in PvE only.
+{{Version history table row|2022-09-13|Warrior}}
+* Fixed an issue that prevented banner effects from prioritizing the warrior who placed them and their party or squad over other allies.
+{{Version history table row|2022-08-02|Warrior}}
+* Light combo field radius reduced from 600 to 360. Combo field duration reduced to from 5 seconds to 3 seconds.
+* Pulsing boon radius reduced to 360.
+* Once placed, banners last for 15 seconds and can no longer be picked up.
+* Banners no longer grant quickness on placement by default (except for Banner of Tactics in PvE only).
+* All banner skills (except for Battle Standard) have been reworked. They now grant different boons when placed, depending on the banner:
+** Battle Standard: Damage multiplier has been increased from 1.5 to 4.0 in PvE only. This skill no longer creates a light combo field but acts as a blast finisher instead.
+* Pulsing boons have changed to the following:
+** Battle Standard: Fury (6 seconds), swiftness (12 seconds), and might (12 seconds, two stacks)
+{{Version history table row|2022-06-28|Warrior}}
+* [[Fury]]: Critical chance bonus increased from 20% to 25% in PvE only.
+* Recharge time reduced from 180 seconds to 120 seconds. Reduced base duration of pulsing boons applied by this banner as follows:
+** [[Might]]: Reduced from 10 seconds to 5 seconds.
+** [[Fury]]: Reduced from 3 seconds to 1 second.
+** [[Swiftness]]: Reduced from 3 seconds to 1 second.
+{{Version history table row|2021-05-11|Warrior}}
+* Reduced the number of allied targets affected from 10 to 5. The Discipline trait Doubled Standards now increases the number of allied targets from 5 to 10.
+* Banners no longer cause blast finishers. They now create a light combo field that persists for 5 seconds after the banner is summoned.
+{{Version history table row|2019-11-19|Warrior}}
+* A 1-second delay before banners can be picked up has been added.
+{{Version history table row|2019-04-23|Warrior}}
+* Fixed a bug that caused this skill to have a shorter casting time while underwater than on land. Adjusted the timing of the visual effects so that the attack lines up properly with the banner's arrival.
+* Banners: Adjusted timing for skill warm-up visual effects.
+{{Version history table row|2019-03-05|Warrior 2}}
+* Banners:
+** Banners no longer have skills and are instead destroyed when they're picked up.
+** Banners can now only be picked up by the warrior who summoned them.
+** Picking up a banner now reduces the recharge time of that banner by 60 seconds.
+** Banners now follow the same rules as [[spirit]]s and [[turret]]s. Banners are now destroyed when the owner enters certain states, such as mounted or defeated.
+* Resynced the time at which a banner appears to properly line up with the effect. When planted in the ground, this banner skill now deals damage to foes within a radius of 180. Foes who are in a downed state are now finished when damaged by Battle Standard. This skill's targeting reticle will now display the radius for effects that finish foes who are in a downed state and effects that revive allies.
+{{Version history table row|2018-05-08|Warrior}}
+* The cooldown of this skill is no longer split between game modes and will now use the lower 180-second cooldown in all modes.
+{{Version history table row|2018-03-27|Warrior}}
+* Fixed a bug that caused banner effects to display at a selected enemy's location rather than the player's location when using a banner underwater.
+* Reduced the cooldown from 240 seconds to 180 seconds in PvP and WvW.
+{{Version history table row|2014-04-15|Warrior 2}}
+* Renamed the Warbanner this skill summons to Battle Standard in order to keep it consistent with the skill's name and description.
+{{Version history table row|2013-10-15|Warrior}}
+* This skill no longer applies boons until the end of the cast to prevent unintended behavior when canceling it.
+{{Version history table row|2013-08-20|Warrior}}
+* Updated this skill to properly display their duration.
+* Battle Standard now displays the casting range of the skill.
+{{Version history table row|2013-06-25|Warrior 2}}
+* This skill has had its underwater aftercast reduced by 1.1 seconds.
+{{Version history table row|2013-05-28|Warrior}}
+* Warrior banners now apply their buffs immediately.
+* No longer initially applies stability and then transitions over to swiftness.
+* It now applies swiftness with stability coming from the active skill on the banner.
+{{Version history table row|2012-10-22|Warrior}}
+* This skill no longer goes on full recharge if it's interrupted while being activated.
+{{Version history table row|release|r=y}}
+|}
+
+== Trivia ==
+* Other banners similar to the one depicted in this skill's icon, identified by the [[gw1:File:Warrior-runic-icon.png|GW1 symbol]] for [[warrior]] [[profession]], also appear in [[:File:The Banners of War concept art.jpg|concept art]].
+
+{{banner nav}}
+
+[[de:Kampfstandarte]]
+[[es:Estandarte de batalla]]
+[[fr:Étendard]]

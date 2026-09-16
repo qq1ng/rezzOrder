@@ -1,0 +1,78 @@
+{{otheruses|the ranger skill|the collection item|Nature Spirit}}
+{{Skill infobox
+| split = pve, wvw pvp
+| description = Summon a [[Spirit of Nature Renewal|spirit]] at a target point and convert [[condition|conditions]] on allies into [[boon|boons]]. The spirit will [[Nature's Renewal|slam]] the ground and then shake, granting [[boon|boons]] to nearby allies.
+| facts = 
+{{skill fact|regeneration|3|stacks=4}}
+{{skill fact|Conditions Converted to Boons|5}}
+{{skill fact|allied targets|5}}
+{{skill fact|radius|360}}
+{{skill fact|range|600}}
+| recharge pve = 90
+| recharge wvw = 120
+| activation = 1.5
+| profession = ranger
+| slot = elite
+| type = spirit
+| hero points = 9
+| summons = Spirit of Nature Renewal
+| chain1 = Spirit of Nature
+| chain2 = Nature's Renewal
+| training order = 6
+| id = 12569
+| palette id = 407
+| gallery1 = Champion Arboreal Spirit.jpg
+| gallery1-text = The [[Spirit of Nature Renewal]].
+}}
+
+== Mechanics ==
+* Summons a [[Spirit of Nature Renewal]] which immediately converts [[Conditions]] on surrounding allies and slams to cast [[Nature's Renewal]], then shakes 4 times, giving [[Regeneration]] every shake. 
+
+== Related [[trait]]s ==
+{{related traits}}
+
+== Version history ==
+{{Version history table header|ranger}}
+{{Version history table row|2024-06-25|Ranger 2}}
+* (Competitive split) Reduced the cooldown from 120 seconds to 90 seconds in PvE only.
+{{Version history table row|2023-06-27|Ranger}}
+* Spirits have been reworked. A spirit will now grant an initial effect when summoned, slam the ground for a secondary effect, and then grant boons to nearby allies for a period of time.
+{{Version history table row|2022-08-23|Ranger}}
+* (PvE only) All ranger spirits are now immune to crowd control on a PvE map.
+{{Version history table row|2022-06-28|Ranger}}
+* Spirit skills now affect 5 allied targets.
+* Spirits no longer apply effects when an ally in the radius strikes an enemy. Instead, each spirit applies a boon to allied targets in the radius at each 3-second interval. The Nature's Vengeance trait increases the base duration of these boons by 50% and causes spirits' activated skills to apply alacrity to allies in an area.
+{{Version history table row|2019-03-05|Ranger}}
+* Spirits have been reworked as follows:
+** When a spirit pulses its passive effect, it loses health equal to a percentage of its maximum health. (7.5% for nonelite spirits, 3% for elite spirits.)
+** The effect radius of a spirit's active skill has been reduced from 1,000 to 600 for all spirits.
+** Spirits now die automatically if the ranger moves away from the spirit beyond a range of 5,000. Spirits also die automatically if the ranger transitions between water travel and land travel.
+** Fixed a bug that caused underwater spirits to use their unique skill when killed.
+*This spirit no longer benefits from its own pulsing heal effect. Reduced the healing per second that this spirit grants to 101 at level 80, plus 3.5% of your healing power.
+{{Version history table row|2017-11-07|Ranger}}
+* Increased the number of targets healed each interval from 5 to 10 targets.
+{{Version history table row|2015-10-23|Ranger}}
+* The healing from this minion now scales with 15% of its master's healing power.
+* The radius of effect increased from 240 to 1000 in order to match the radius of other spirit skills.
+* Decreased the base heal value by about 35%.
+{{Version history table row|2015-06-23|Ranger 2}}
+* Reduced recharge to 120 seconds.
+{{Version history table row|2014-05-20|Ranger}}
+* Updated the interval skill fact from 3 to 1.
+{{Version history table row|2014-04-15|Ranger 2}}
+* Reduced the healing per second while summoned from 480 to 320.
+{{Version history table row|2013-11-26|Ranger}}
+* Added radius and time-interval skill facts.
+* Decreased the hit-point value of the underwater version of this spirit to be consistent with the land version.
+* Summoning the spirit will now put its activated skill on a 1-second cooldown; this will fix an issue that caused the skill to begin recharging without firing when activated immediately.
+{{Version history table row|2013-09-03|Ranger}}
+* Storm Spirit, Frost Spirit, Sun Spirit, Stone Spirit, and Spirit of Nature will now begin their recharge when the spirit dies instead of when the spirit is summoned.
+* Recharge has been reduced from 240 seconds to 180 seconds.
+{{Version history table row|2013-06-25|Ranger}}
+* Spirit of Nature has had its underwater aftercast reduced by 1.1 seconds.
+{{Version history table row|release|r=y}}
+|}
+
+[[de:Geist der Natur]]
+[[es:Espíritu de la naturaleza]]
+[[fr:Esprit de la Nature]]

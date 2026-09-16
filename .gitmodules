@@ -1,0 +1,12 @@
+[submodule "external/nexus"]
+	path = external/nexus
+	url = https://github.com/RaidcoreGG/Nexus-API.git
+[submodule "external/imgui"]
+	path = external/imgui
+	url = https://github.com/RaidcoreGG/imgui.git
+[submodule "external/mumble"]
+	path = external/mumble
+	url = https://github.com/RaidcoreGG/RCGG-lib-mumble-api.git
+[submodule "external/unofficial_extras"]
+	path = external/unofficial_extras
+	url = https://github.com/Krappa322/arcdps_unofficial_extras_releases.git

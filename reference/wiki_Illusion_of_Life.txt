@@ -1,0 +1,71 @@
+{{Skill infobox
+| split = pve pvp, wvw
+| description = Give [[ally|allies]] Illusion of Life at the target location, allowing them to get up from [[downed|downed state]] and keep fighting. Fully [[revive]]s allies if they kill a foe.
+| facts = 
+{{skill fact|effect|Illusion of Life (effect)|15}}
+{{Skill fact|targets|3}}
+{{skill fact|radius|240}}
+{{skill fact|capture}}
+{{skill fact|range|1200}}
+| activation = 1.25
+| recharge = 75
+| recharge wvw = 90
+| profession = Mesmer
+| slot = utility
+| type = manipulation
+| hero points = 4
+| ground target = circle
+| training order = 4
+| id = 10244
+| palette id = 388
+}}
+== Mechanics ==
+* Functionally, the skill is a direct revive with an additional effect: if no enemy is killed by the ally, they are dealt 100% of maximum health as damage (unaffected by damage reductions and [[barrier]]) when the effect ends.
+** Direct revive means that the resurrection is applied independent of other effects (e.g. poison).
+** If an ally were to go into downstate while under this effect before it times out, they will become [[defeated]] instead.
+** If an ally is under the effect of {{effect|Defiant Stance (effect)}} or {{effect|Infuse Light (effect)}} as the timer ends, they will be healed instead of going into [[downed]] state.
+** Mounting up before the timer ends will prevent going into downed state and just de-mount you instead.
+** Being downed from this damage will incur further [[downed penalty]].
+*** If at maximum [[downed penalty]] the ally will become [[defeated]] instead.
+
+== Related [[trait]]s ==
+{{related traits}}
+
+== Version history ==
+{{Version history table header|mesmer}}
+{{Version history table row|2025-02-11|Mesmer 2}}
+* Fixed an issue that prevented this skill from returning players with barrier to the downed state. 
+* Increased the cooldown from 75 seconds to 90 seconds in WvW only.
+{{Version history table row|2021-08-17|Mesmer}}
+* Fixed a bug that could cause affected allies to fail to be fully revived when killing enemies in certain content types or locations.
+{{Version history table row|2019-10-01|Mesmer}}
+* Reduced the amount of time a resurrected ally is invulnerable from 5 seconds to 1 second. This skill should now target more effectively in group situations.
+{{Version history table row|2018-05-08|Mesmer}}
+* The cooldown of this skill is no longer split between game modes and will now use the lower 75-second cooldown in all modes.
+{{Version history table row|2018-03-27|Mesmer}}
+* Reduced the cooldown from 120 seconds to 75 seconds in PvP and WvW.
+{{Version history table row|2015-06-23|Skills 4}}
+* Manipulation skill range has been increased to 1200.
+{{Version history table row|2015-01-27|Mesmer}}
+* The cooldown on this skill has been reduced from 130 seconds to 120 seconds.
+{{Version history table row|2014-09-09|Mesmer}}
+* This skill can now be used underwater, centered on the mesmer's location.
+{{Version history table row|2014-04-15|Mesmer 2}}
+* Fixed a bug that would reset the cooldown for this skill when Far-Reaching Manipulations was equipped.
+* Fixed a bug in which the skill would count the player as one of the max targets.
+* Added a skill fact for number of targets: 3.
+{{Version history table row|2013-08-06|Mesmer}}
+* Updated the animation and effects on this skill to make it easier to read when it is being cast in combat. The timing and effectiveness remains unchanged.
+{{Version history table row|2013-06-25|Mesmer}}
+* Fixed an issue so that Far-Reaching Manipulations no longer reduces the cast time of this skill.
+{{Version history table row|2013-04-30|Mesmer}}
+* Players can no longer circumvent the vengeance properties.
+* Increased cast time by 0.5 seconds.
+{{Version history table row|2013-01-28|Mesmer}}
+* This skill should no longer allow players to rally off of creatures that grant no experience.
+{{Version history table row|release|r=y}}
+|}
+
+[[de:Illusion des Lebens]]
+[[es:Ilusión de vida]]
+[[fr:Illusion de vie]]

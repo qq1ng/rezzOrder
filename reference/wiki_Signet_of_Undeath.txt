@@ -1,0 +1,54 @@
+{{Skill infobox
+| split = pve wvw, pvp
+| description = {{skill type|Signet Passive|:}} Generates [[life force]] while in combat.<br>{{skill type|Signet Active|:}} Sacrifice health to [[revival|revive]] one [[downed]] ally in a target area.
+| facts = {{skill fact|Life Force|alt=Life Force per 3 Seconds|4|game mode = pve wvw}}{{skill fact|Life Force|alt=Life Force per 3 Seconds|2|game mode = pvp}}{{skill fact|allied targets|1}}{{skill fact|radius|180}}{{skill fact|range|900}}
+| recharge = 75
+| activation = 1.5
+| health cost = 9606
+| ground target = y
+| profession = necromancer
+| slot = utility
+| type = signet
+| hero points = 4
+| training order = 5
+| id = 10611
+| palette id = 367
+| gallery1 = Signet of Undeath (overhead icon).png
+| gallery1-text = Overhead activation icon
+}}
+
+== Notes ==
+* As revival is affected by [[healing]] modifiers, a [[poisoned]] player with less than 33% health will not be fully revived.
+* Activating this skill costs additional 50% of the base [[health]] and the health gained from the base [[vitality]], which is 9,606 health at level 80.
+* [[Barrier]] will reduce the health lost.
+* The cost is not affected by effects that reduce maximum health, such as [[Blight]] or [[Kryptis Essence]]/[[Calibrated Essence]].
+
+== Version history ==
+{{Version history table header|necromancer}}
+{{Version history table row|2021-03-09|Necromancer}}
+* Fixed a bug that caused this skill to have a different recharge duration while players were underwater.
+{{Version history table row|2020-03-04|Necromancer}}
+* Reduced passive life force gained per interval from 4% to 2% in PvP only.
+{{Version history table row|2019-12-03|Necromancer}}
+* Reduced recharge to 75 seconds in all game modes. Reduced casting time from 3 seconds to 1.5 seconds. Reduced the number of allies revived from 3 to 1. Added an additional health cost of 50% of base health to this skill. Increased the passive life force gain by 100%.
+{{Version history table row|2018-03-27|Necromancer}}
+* Reduced the cooldown from 150 seconds to 90 seconds in PvP and WvW.
+{{Version history table row|2016-07-26|Necromancer 2}}
+* Reduced the cooldown of this skill from 180 seconds to 150 seconds.
+{{Version history table row|2015-06-23|Necromancer 2}}
+* This skill now has a small strike of damage to foes within its area of effect.
+{{Version history table row|2015-01-27|Necromancer}}
+* The passive life-force gain of this skill has been increased from 1% to 2%.
+{{Version history table row|2014-07-01|Necromancer}}
+* Added a skill fact for number of targets (3).
+{{Version history table row|2014-05-20|Necromancer}}
+* Fixed an issue that caused this skill to be ground targeted while under water.
+* This skill now revives allies in an area around the player (240 radius) while under water.
+{{Version history table row|2013-06-25|Necromancer 2}}
+* Increased the cast time to 3 seconds.
+{{Version history table row|release|r=y}}
+|}
+
+[[de:Siegel des Untodes]]
+[[es:Sello de los muertos vivientes]]
+[[fr:Signe de non-vie]]
