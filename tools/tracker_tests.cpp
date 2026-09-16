@@ -1,10 +1,15 @@
 // Unit tests for Rezz::Tracker and Rezz::Session. Run: build/release/rezz_tracker_tests.exe (exit code 0 = all passed).
 
+#include <algorithm>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 
 #include "Arc.h"
+#include "Demo.h"
 #include "Session.h"
+#include "Settings.h"
+#include "Share.h"
 #include "Tracker.h"
 
 namespace
@@ -466,6 +471,394 @@ namespace
 		t.OnAgentUpdate(Agent(":me.1", 1, 1, 7, true, true), 2000);
 		CHECK(t.Order().empty());
 	}
+
+	// ---------------------------------------------------------------- sharing an order in squad chat
+
+	Rezz::RosterMember Who(const std::string& aAccount, const std::string& aCharacter, Rezz::SquadRole aRole = Rezz::SquadRole::Member)
+	{
+		Rezz::RosterMember member;
+		member.Account = aAccount;
+		member.Character = aCharacter;
+		member.Role = aRole;
+		return member;
+	}
+
+	// Settings are the only state that survives a restart, so what goes out has to come back.
+	void TestSettingsRoundTrip()
+	{
+		std::filesystem::path file = std::filesystem::temp_directory_path() / "rezz_settings_test.txt";
+		std::error_code ec;
+		std::filesystem::remove(file, ec);
+
+		Settings::Load(file); // no file yet: defaults
+		Settings::Values& s = Settings::Current;
+		CHECK(s.Layout == Settings::OverlayLayout::Compact);
+		CHECK(s.CooldownBar && s.CooldownSeconds);
+		CHECK(s.ShareFromLeaders && !s.ShareFromAnyone);
+
+		s.Order = { ":a.1", ":b.2" };
+		s.Nicknames[":a.1"] = "tag";
+		s.Presets["night squad"] = { ":b.2", ":a.1" };
+		s.Presets["duo"] = { ":a.1" };
+		s.Layout = Settings::OverlayLayout::Focus;
+		s.CooldownSeconds = false;
+		s.ShareFromAnyone = true;
+		s.OverlayMaxRows = 5;
+		s.OverlayWidth = 420.0f;
+		Settings::MarkDirty();
+		Settings::Flush(0, true);
+
+		Settings::Current = Settings::Values{}; // as if the game had restarted
+		Settings::Load(file);
+		const Settings::Values& back = Settings::Current;
+		CHECK(back.Order == std::vector<std::string>({ ":a.1", ":b.2" }));
+		CHECK(back.Nicknames.size() == 1 && back.Nicknames.at(":a.1") == "tag");
+		CHECK(back.Presets.size() == 2);
+		CHECK(back.Presets.at("night squad") == std::vector<std::string>({ ":b.2", ":a.1" }));
+		CHECK(back.Layout == Settings::OverlayLayout::Focus);
+		CHECK(back.CooldownBar && !back.CooldownSeconds);
+		CHECK(back.ShareFromAnyone);
+		CHECK(back.OverlayMaxRows == 5);
+		CHECK(back.OverlayWidth == 420.0f);
+		std::filesystem::remove(file, ec);
+	}
+
+	// Demo mode has to keep showing a squad that makes sense, all the way around its loop and past the end
+	// of it, because it runs unattended while somebody drags the window around.
+	void TestDemoLoopStaysSane()
+	{
+		const std::string me = ":me.1234";
+		Rezz::Demo::Start(me, 0);
+		CHECK(Rezz::Demo::Running());
+
+		int turnChanges = 0;
+		std::string lastUp = "?";
+		for (uint64_t now = 0; now <= 250000; now += 1000) // two and a half loops
+		{
+			Rezz::SessionView view = Rezz::Demo::View(now);
+			CHECK(view.Order.size() == 6);
+			CHECK(view.Turn.Rows.size() == 6);
+			CHECK(std::find(view.Order.begin(), view.Order.end(), me) != view.Order.end());
+			CHECK(view.SelfAccount == me);
+			std::string up = view.Turn.UpIndex < 0 ? "-" : view.Turn.Rows[view.Turn.UpIndex].Account;
+			if (up != lastUp) { turnChanges++; lastUp = up; }
+		}
+		CHECK(turnChanges >= 4); // a demo where the turn never moves shows nothing
+
+		Rezz::Demo::Stop();
+		CHECK(!Rezz::Demo::Running());
+		CHECK(Rezz::Demo::View(1000).Order.empty());
+	}
+
+	void TestShareEncodesReadableLine()
+	{
+		std::vector<Rezz::RosterMember> roster = { Who(":Gorath.5076", "Gorath"), Who(":murako.9143", "murako"),
+			Who(":Sairana.6610", "Sairana") };
+		std::string line = Rezz::Share::Encode({ ":Gorath.5076", ":murako.9143", ":Sairana.6610" }, roster);
+		CHECK(line == "!rezz Gorath > murako > Sairana");
+
+		// Two accounts with the same name before the dot: both get their full account name.
+		roster.push_back(Who(":Gorath.1111", "Gorath the second"));
+		line = Rezz::Share::Encode({ ":Gorath.5076", ":murako.9143" }, roster);
+		CHECK(line == "!rezz Gorath.5076 > murako");
+	}
+
+	void TestShareFitsInAChatMessage()
+	{
+		std::vector<std::string> order;
+		std::vector<Rezz::RosterMember> roster;
+		for (int i = 0; i < 20; i++)
+		{
+			std::string account = ":Averyverylongaccountname" + std::string(1, static_cast<char>('a' + i)) + ".1234";
+			order.push_back(account);
+			roster.push_back(Who(account, "Someone"));
+		}
+		std::string line = Rezz::Share::Encode(order, roster);
+		CHECK(line.size() <= Rezz::Share::kMaxChatChars);
+		// Whatever survives still has to be readable by the other clients.
+		Rezz::Share::Message message = Rezz::Share::Parse(line);
+		CHECK(message.What == Rezz::Share::Kind::Order);
+		CHECK(!message.Names.empty());
+		CHECK(Rezz::Share::Resolve(message.Names, roster).Unknown.empty());
+	}
+
+	// Whatever goes into a chat line has to come back out as the same squad members: this is the whole
+	// promise of sharing, and the one part nobody can check by looking at the screen.
+	void TestShareRoundTripsEverySquad()
+	{
+		struct Case { const char* Name; std::vector<std::string> Accounts; };
+		const std::vector<Case> cases = {
+			{ "one player", { ":Solo.1234" } },
+			{ "plain squad", { ":Gorath.5076", ":murako.9143", ":Sairana.6610", ":Moister.3388" } },
+			{ "same name before the dot", { ":Gorath.5076", ":Gorath.1111", ":Gorath.2222" } },
+			{ "names that start alike", { ":Rezzy.1", ":Rezza.2", ":Rezzo.3", ":Rez.4" } },
+			{ "spaces in names", { ":Vivi Prin.7752", ":Vivi Pran.7753" } },
+		};
+		for (const Case& test : cases)
+		{
+			std::vector<Rezz::RosterMember> roster;
+			for (const std::string& account : test.Accounts) { roster.push_back(Who(account, "")); }
+			// Somebody in the squad who is not in the order must not be picked up by mistake.
+			roster.push_back(Who(":Bystander.4444", "Bystander"));
+
+			std::string line = Rezz::Share::Encode(test.Accounts, roster);
+			if (line.size() > Rezz::Share::kMaxChatChars) { std::printf("  (%s) line too long\n", test.Name); }
+			CHECK(line.size() <= Rezz::Share::kMaxChatChars);
+			Rezz::Share::Message message = Rezz::Share::Parse(line);
+			CHECK(message.What == Rezz::Share::Kind::Order);
+			Rezz::Share::Resolved resolved = Rezz::Share::Resolve(message.Names, roster);
+			if (resolved.Accounts != test.Accounts)
+			{
+				std::printf("  (%s) '%s' came back as %zu of %zu\n", test.Name, line.c_str(),
+					resolved.Accounts.size(), test.Accounts.size());
+			}
+			CHECK(resolved.Accounts == test.Accounts);
+			CHECK(resolved.Unknown.empty());
+		}
+	}
+
+	// A full squad of long names still fits, by shortening rather than by dropping players. (Names that
+	// differ only at the very end cannot be shortened at all; that case drops players instead, and is
+	// covered by "share fits in a chat message".)
+	void TestShareKeepsEveryoneWhenItCan()
+	{
+		const char* kNames[] = { "Aardvarkrider", "Bumblebeeking", "Cathedralbell", "Dragonhunter",
+			"Elderwoodsman", "Frostbittenone", "Gravelthrower", "Harbingerhowl", "Ironbarkshield",
+			"Jubilantjaunt", "Keeperofkeys", "Lanternlighter" };
+		std::vector<std::string> order;
+		std::vector<Rezz::RosterMember> roster;
+		for (const char* name : kNames)
+		{
+			std::string account = std::string(":") + name + ".1234";
+			order.push_back(account);
+			roster.push_back(Who(account, ""));
+		}
+		std::string line = Rezz::Share::Encode(order, roster);
+		CHECK(line.size() <= Rezz::Share::kMaxChatChars);
+		Rezz::Share::Resolved resolved = Rezz::Share::Resolve(Rezz::Share::Parse(line).Names, roster);
+		if (resolved.Accounts.size() != order.size()) { std::printf("  kept %zu of 12: %s\n", resolved.Accounts.size(), line.c_str()); }
+		CHECK(resolved.Accounts == order);
+	}
+
+	void TestShareParsesWhatPeopleType()
+	{
+		using Kind = Rezz::Share::Kind;
+		CHECK(Rezz::Share::Parse("hello everyone").What == Kind::None);
+		CHECK(Rezz::Share::Parse("!rezz?").What == Kind::Request);
+		CHECK(Rezz::Share::Parse("  !REZZ  ").What == Kind::Request);
+		Rezz::Share::Message message = Rezz::Share::Parse("!rezz Gorath, murako > Sairana ");
+		CHECK(message.What == Kind::Order);
+		CHECK(message.Names.size() == 3);
+		CHECK(message.Names[1] == "murako");
+	}
+
+	void TestShareResolvesAgainstTheSquad()
+	{
+		std::vector<Rezz::RosterMember> roster = { Who(":Gorath.5076", "Gorath"), Who(":murako.9143", "Sleeplxss"),
+			Who(":Sairana.6610", "Sairana") };
+		Rezz::Share::Resolved resolved = Rezz::Share::Resolve({ "Gora", "Sleeplxss", "Nobody" }, roster);
+		CHECK(resolved.Accounts.size() == 2);
+		CHECK(resolved.Accounts[0] == ":Gorath.5076");
+		CHECK(resolved.Accounts[1] == ":murako.9143"); // matched by character name
+		CHECK(resolved.Unknown.size() == 1 && resolved.Unknown[0] == "Nobody");
+	}
+
+	void TestSharedOrderFromLeaderIsApplied()
+	{
+		Rezz::Session s;
+		s.OnAgentUpdate(Agent(A, 100, 7, 2, true, true), 0);  // us
+		s.OnAgentUpdate(Agent(B, 200, 8, 4, true), 0);
+		s.OnAgentUpdate(Agent(C, 300, 9, 1, true), 0);
+		s.OnRole(B, Rezz::SquadRole::Leader, 1, 0);
+		s.OnRole(C, Rezz::SquadRole::Member, 1, 0);
+
+		s.OnChatMessage(B, "!rezz c > b > a", 1000);
+		CHECK(s.Order() == std::vector<std::string>({ C, B, A }));
+		std::vector<Rezz::Notice> notices = s.TakeNotices();
+		CHECK(notices.size() == 1 && notices[0].Kind == Rezz::NoticeKind::ShareApplied);
+
+		// A plain member's order waits for us instead.
+		s.OnChatMessage(C, "!rezz a > b", 2000);
+		CHECK(s.Order() == std::vector<std::string>({ C, B, A }));
+		Rezz::SessionView view = s.GetView(2500);
+		CHECK(view.HasShare);
+		CHECK(view.Share.From == C);
+		CHECK(view.Share.Accounts == std::vector<std::string>({ A, B }));
+		s.AcceptShare();
+		CHECK(s.Order() == std::vector<std::string>({ A, B }));
+		CHECK(!s.GetView(3000).HasShare);
+	}
+
+	// A request has to stay on screen long enough to be answered, and stop asking once it is stale.
+	void TestOrderRequestWaitsForAnAnswer()
+	{
+		Rezz::Session s;
+		s.OnAgentUpdate(Agent(A, 100, 7, 2, true, true), 0);
+		s.OnAgentUpdate(Agent(B, 200, 8, 4, true), 0);
+		s.SetOrder({ A, B });
+
+		s.OnChatMessage(B, "!rezz?", 1000);
+		CHECK(s.GetView(2000).HasRequest);
+		CHECK(s.GetView(2000).RequestFrom == B);
+		CHECK(!s.GetView(1000 + Rezz::Session::kRequestShowMs + 1).HasRequest);
+
+		s.OnChatMessage(B, "!rezz?", 100000);
+		CHECK(s.GetView(101000).HasRequest);
+		s.ClearRequest(); // answered, or waved away
+		CHECK(!s.GetView(101000).HasRequest);
+
+		// Without an order of our own there is nothing to answer with.
+		s.SetOrder({});
+		s.OnChatMessage(B, "!rezz?", 102000);
+		CHECK(!s.GetView(103000).HasRequest);
+	}
+
+	// One "!rezz?" must not open a window on every screen in the squad: only the client whose order it is
+	// gets asked, and even that closes as soon as somebody answers.
+	void TestOnlyTheOrdersOwnerIsAsked()
+	{
+		Rezz::Session s;
+		s.OnAgentUpdate(Agent(A, 100, 7, 2, true, true), 0); // us
+		s.OnAgentUpdate(Agent(B, 200, 8, 4, true), 0);
+		s.OnAgentUpdate(Agent(C, 300, 9, 1, true), 0);
+		s.OnRole(B, Rezz::SquadRole::Leader, 1, 0);
+
+		// The commander's order arrives and we take it over: it is not ours to answer for.
+		s.OnChatMessage(B, "!rezz a > b > c", 1000);
+		CHECK(!s.OrderIsOurs());
+		s.OnChatMessage(C, "!rezz?", 2000);
+		CHECK(!s.GetView(2500).HasRequest);
+		CHECK(s.TakeNotices().size() == 2); // the share and the request are still worth saying
+
+		// Building the order here makes it ours again.
+		s.SetOrder({ A, B });
+		CHECK(s.OrderIsOurs());
+		s.OnChatMessage(C, "!rezz?", 3000);
+		CHECK(s.GetView(3500).HasRequest);
+
+		// Somebody else answered in chat: the question is settled for everyone.
+		s.OnChatMessage(B, "!rezz b > a", 4000);
+		CHECK(!s.GetView(4500).HasRequest);
+
+		// "always" is for the player who wants to answer whatever happens.
+		s.SetAnswerRule(Rezz::Session::AnswerRule::Always);
+		s.OnChatMessage(C, "!rezz?", 5000);
+		CHECK(s.GetView(5500).HasRequest);
+		s.SetAnswerRule(Rezz::Session::AnswerRule::Never);
+		CHECK(!s.GetView(5500).HasRequest);
+	}
+
+	// A shared order can move us, and where we stand is what we have to be told about.
+	// Somebody ahead of us dropping out is the one way the turn reaches us without anybody casting, so the
+	// leave notice has to say so.
+	void TestLeaveSaysWhenTheTurnMovesToUs()
+	{
+		Rezz::Session s;
+		s.OnAgentUpdate(Agent(B, 200, 8, 4, true), 0);        // 1. B
+		s.OnAgentUpdate(Agent(C, 300, 9, 1, true), 0);        // 2. C
+		s.OnAgentUpdate(Agent(A, 100, 7, 2, true, true), 0);  // 3. us
+		s.OnRole(B, Rezz::SquadRole::Member, 1, 0);
+		s.OnRole(C, Rezz::SquadRole::Member, 1, 0);
+		s.SetOrder({ B, C, A });
+
+		auto lastText = [&]()
+		{
+			std::vector<Rezz::Notice> notices = s.TakeNotices();
+			return notices.empty() ? std::string() : notices.back().Text;
+		};
+
+		// C is the backup behind B; we are third and it is nobody's business yet.
+		CHECK(s.GetView(1000).Turn.UpIndex == 0);
+		s.OnRole(C, Rezz::SquadRole::None, 1, 2000); // the backup leaves: we move up to backup
+		CHECK(lastText().find("you are the backup now") != std::string::npos);
+
+		s.OnRole(B, Rezz::SquadRole::None, 1, 3000); // and now the player who was up
+		std::string text = lastText();
+		CHECK(text.find("left the squad") != std::string::npos);
+		CHECK(text.find("you are up now") != std::string::npos);
+		CHECK(s.GetView(3500).Turn.Rows[2].Account == A);
+	}
+
+	// Somebody behind us leaving changes nothing about our turn, and the notice stays quiet about it.
+	void TestLeaveBehindUsSaysNothingExtra()
+	{
+		Rezz::Session s;
+		s.OnAgentUpdate(Agent(A, 100, 7, 2, true, true), 0); // 1. us, already up
+		s.OnAgentUpdate(Agent(B, 200, 8, 4, true), 0);
+		s.OnAgentUpdate(Agent(C, 300, 9, 1, true), 0);
+		s.OnRole(C, Rezz::SquadRole::Member, 1, 0);
+		s.SetOrder({ A, B, C });
+		s.TakeNotices();
+
+		s.OnRole(C, Rezz::SquadRole::None, 1, 2000);
+		std::vector<Rezz::Notice> notices = s.TakeNotices();
+		CHECK(notices.size() == 1);
+		CHECK(notices[0].Text.find("you are") == std::string::npos);
+	}
+
+	void TestSharedOrderReportsOurNewPlace()
+	{
+		Rezz::Session s;
+		s.OnAgentUpdate(Agent(A, 100, 7, 2, true, true), 0); // us
+		s.OnAgentUpdate(Agent(B, 200, 8, 4, true), 0);
+		s.OnAgentUpdate(Agent(C, 300, 9, 1, true), 0);
+		s.OnRole(B, Rezz::SquadRole::Leader, 1, 0);
+		s.SetOrder({ A, B, C });
+		CHECK(s.SelfPlace() == 1);
+
+		auto lastText = [&]()
+		{
+			std::vector<Rezz::Notice> notices = s.TakeNotices();
+			return notices.empty() ? std::string() : notices.back().Text;
+		};
+
+		// Moved down the order.
+		s.OnChatMessage(B, "!rezz b > c > a", 1000);
+		CHECK(s.SelfPlace() == 3);
+		CHECK(lastText().find("you are now 3. (was 1.)") != std::string::npos);
+
+		// Same places again: nothing to say about it.
+		s.OnChatMessage(B, "!rezz b > c > a", 2000);
+		CHECK(lastText().find("you are now") == std::string::npos);
+
+		// Dropped from the order entirely.
+		s.OnChatMessage(B, "!rezz b > c", 3000);
+		CHECK(s.SelfPlace() == 0);
+		CHECK(lastText().find("not in it any more") != std::string::npos);
+
+		// And put back in, through the prompt this time.
+		s.SetShareRules(false, false);
+		s.OnChatMessage(C, "!rezz a > b", 4000);
+		Rezz::SessionView view = s.GetView(4500);
+		CHECK(view.HasShare);
+		CHECK(view.Share.OurPlaceNow == 0 && view.Share.OurPlaceThen == 1);
+		s.TakeNotices();
+		s.AcceptShare();
+		CHECK(lastText().find("you are now 1.") != std::string::npos);
+	}
+
+	void TestOwnPasteAndRequestsAreHandled()
+	{
+		Rezz::Session s;
+		s.OnAgentUpdate(Agent(A, 100, 7, 2, true, true), 0);
+		s.OnAgentUpdate(Agent(B, 200, 8, 4, true), 0);
+		s.SetOrder({ A, B });
+
+		// Our own message is the one we just pasted: it must not come back at us.
+		s.OnChatMessage(A, "!rezz b > a", 1000);
+		CHECK(s.Order() == std::vector<std::string>({ A, B }));
+		CHECK(s.TakeNotices().empty());
+
+		s.OnChatMessage(B, "!rezz?", 2000);
+		std::vector<Rezz::Notice> notices = s.TakeNotices();
+		CHECK(notices.size() == 1 && notices[0].Kind == Rezz::NoticeKind::ShareRequested);
+
+		// Nobody can answer a request without an order.
+		Rezz::Session empty;
+		empty.OnChatMessage(B, "!rezz?", 3000);
+		CHECK(empty.TakeNotices().empty());
+	}
+
 }
 
 int main()
@@ -495,6 +888,21 @@ int main()
 		{ "ready is unconfirmed until watched", TestReadyIsUnconfirmedUntilWatched },
 		{ "leaving during our loading screen", TestLeavingDuringOurLoadingScreen },
 		{ "out of range is visible", TestOutOfRangeIsVisible },
+		{ "settings round trip", TestSettingsRoundTrip },
+		{ "demo loop stays sane", TestDemoLoopStaysSane },
+		{ "share encodes a readable line", TestShareEncodesReadableLine },
+		{ "share fits in a chat message", TestShareFitsInAChatMessage },
+		{ "share round trips every squad", TestShareRoundTripsEverySquad },
+		{ "share keeps everyone when it can", TestShareKeepsEveryoneWhenItCan },
+		{ "share parses what people type", TestShareParsesWhatPeopleType },
+		{ "share resolves against the squad", TestShareResolvesAgainstTheSquad },
+		{ "shared order from a leader is applied", TestSharedOrderFromLeaderIsApplied },
+		{ "own paste and requests", TestOwnPasteAndRequestsAreHandled },
+		{ "order request waits for an answer", TestOrderRequestWaitsForAnAnswer },
+		{ "only the order's owner is asked", TestOnlyTheOrdersOwnerIsAsked },
+		{ "leave says when the turn moves to us", TestLeaveSaysWhenTheTurnMovesToUs },
+		{ "leave behind us says nothing extra", TestLeaveBehindUsSaysNothingExtra },
+		{ "shared order reports our new place", TestSharedOrderReportsOurNewPlace },
 	};
 
 	for (const auto& test : tests)

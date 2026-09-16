@@ -55,6 +55,7 @@ namespace Rezz
 		const PlayerStatus* Player    = nullptr; // null until the player has produced an event
 		Eligibility         Status    = Eligibility::Ready;
 		uint64_t            ReadyInMs = 0;       // for Cooldown
+		uint64_t            RechargeMs = 0;     // full recharge of the skill being waited on, for a progress bar
 		bool                IsUp      = false;
 		bool                IsLastUser = false;
 		// Ready is a guess: no cast of theirs has been seen yet and they haven't been watched for a full

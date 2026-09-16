@@ -9,10 +9,12 @@
 
 #include "Arc.h"
 #include "Capture.h"
+#include "Demo.h"
 #include "Diagnostics.h"
 #include "Fonts.h"
 #include "Icons.h"
 #include "Live.h"
+#include "Notify.h"
 #include "OrderUi.h"
 #include "Settings.h"
 #include "Ui.h"
@@ -21,7 +23,7 @@
 #include <mmsystem.h>
 
 #define ADDON_NAME "Rezz Order"
-#define ADDON_VERSION_STRING "0.1.0-phase2"
+#define ADDON_VERSION_STRING "0.2.0-dev"
 
 namespace
 {
@@ -29,6 +31,7 @@ namespace
 	constexpr const char* KB_MARK   = "KB_REZZORDER_MARK";
 	constexpr const char* KB_EDITOR = "KB_REZZORDER_EDITOR";
 	constexpr const char* KB_LOCK   = "KB_REZZORDER_LOCK_OVERLAY";
+	constexpr const char* KB_COPY   = "KB_REZZORDER_COPY_ORDER";
 	constexpr const char* QA_MENU_ITEM = "QA_REZZORDER_MENU";
 
 	// Events raised by the Arcdps Integration addon (arcdps + Unofficial Extras relay).
@@ -78,7 +81,12 @@ namespace
 	}
 
 	void OnSelfJoin(void* aArgs)    { OnAgent("SELF_JOIN", aArgs); }
-	void OnSelfLeave(void* aArgs)   { OnAgent("SELF_LEAVE", aArgs); }
+	void OnSelfLeave(void* aArgs)
+	{
+		// Swapping character or hopping maps: the fake squad would outlive what it was started for.
+		Rezz::Demo::Stop();
+		OnAgent("SELF_LEAVE", aArgs);
+	}
 	void OnSquadJoin(void* aArgs)   { OnAgent("SQUAD_JOIN", aArgs); }
 	void OnSquadLeave(void* aArgs)  { OnAgent("SQUAD_LEAVE", aArgs); }
 
@@ -91,7 +99,12 @@ namespace
 		}
 	}
 
-	void OnUeChatMessage(void* aArgs) { Capture::OnChatMessage(static_cast<SquadMessageInfo*>(aArgs)); }
+	void OnUeChatMessage(void* aArgs)
+	{
+		auto* message = static_cast<SquadMessageInfo*>(aArgs);
+		Live::OnChatMessage(message);
+		Capture::OnChatMessage(message);
+	}
 
 	UINT OnWndProc(HWND, UINT aMsg, WPARAM aWParam, LPARAM aLParam)
 	{
@@ -110,6 +123,30 @@ namespace
 		else if (std::strcmp(aIdentifier, KB_MARK) == 0) { Ui::MarkRequested = true; }
 		else if (std::strcmp(aIdentifier, KB_EDITOR) == 0) { OrderUi::EditorToggleRequested = true; }
 		else if (std::strcmp(aIdentifier, KB_LOCK) == 0) { OrderUi::LockToggleRequested = true; }
+		else if (std::strcmp(aIdentifier, KB_COPY) == 0) { OrderUi::CopyOrderRequested = true; }
+	}
+
+	// Every message shows in the turn window; these are the ones worth putting across the screen as well.
+	bool WantsBanner(Rezz::NoticeKind aKind)
+	{
+		const Settings::Values& s = Settings::Current;
+		switch (aKind)
+		{
+			case Rezz::NoticeKind::LeftSquad:
+			case Rezz::NoticeKind::LeftMap:           return s.BannerOnLeave;
+			case Rezz::NoticeKind::ChangedProfession: return s.BannerOnSwap;
+			case Rezz::NoticeKind::ShareApplied:
+			case Rezz::NoticeKind::ShareOffered:      return s.BannerOnShare;
+			case Rezz::NoticeKind::ShareRequested:    return s.BannerOnAsk;
+			// Somebody coming back, and our own order being cleared when we leave the squad, are shown in
+			// the window only: neither needs the screen.
+			default: return false;
+		}
+	}
+
+	void OnStandingBanner(const std::string& aText)
+	{
+		if (s_Api) { s_Api->GUI_SendAlert(("Rezz Order: " + aText).c_str()); }
 	}
 
 	void CheckDependencies(uint32_t aNowMs)
@@ -123,7 +160,13 @@ namespace
 				" unofficial_extras=" + std::to_string(Ui::Deps.UnofficialExtras));
 			if (problems.empty())
 			{
-				s_Api->GUI_SendAlert("Rezz Order: all set.");
+				// Only on the first run of a build: after that the player knows it works.
+				if (Settings::Current.LastSeenVersion != ADDON_VERSION_STRING)
+				{
+					s_Api->GUI_SendAlert("Rezz Order " ADDON_VERSION_STRING ": all set.");
+					Settings::Current.LastSeenVersion = ADDON_VERSION_STRING;
+					Settings::MarkDirty();
+				}
 			}
 			else
 			{
@@ -150,6 +193,8 @@ namespace
 		{
 			s_LastMapId = s_Mumble->Context.MapID;
 			Capture::OnMapChange(s_LastMapId, static_cast<uint8_t>(s_Mumble->Context.MapType), s_Mumble->Context.IsCompetitive);
+			// A demo is for setting the window up where you are standing; a new map is a new situation.
+			Rezz::Demo::Stop();
 		}
 
 		Capture::TickInfo tick;
@@ -169,7 +214,7 @@ namespace
 		{
 			OrderUi::AddNotice(notice.Text, now);
 			if (notice.Kind == Rezz::NoticeKind::OrderCleared) { OrderUi::OnOrderCleared(); }
-			if (Settings::Current.AlertOnChanges) { s_Api->GUI_SendAlert(("Rezz Order: " + notice.Text).c_str()); }
+			if (WantsBanner(notice.Kind)) { s_Api->GUI_SendAlert(("Rezz Order: " + notice.Text).c_str()); }
 		}
 
 		bool gameplay = s_NexusLink == nullptr || s_NexusLink->IsGameplay;
@@ -195,6 +240,7 @@ namespace
 	void OnQuickAccessMenu()
 	{
 		if (ImGui::Button("Rezz Order editor")) { OrderUi::ShowEditor = true; }
+		if (ImGui::Button("Copy order for squad chat")) { OrderUi::CopyOrderRequested = true; }
 	}
 
 	void AddonLoad(AddonAPI_t* aApi)
@@ -239,12 +285,15 @@ namespace
 		s_Api->InputBinds_RegisterWithString(KB_MARK, OnInputBind, "CTRL+SHIFT+M");
 		s_Api->InputBinds_RegisterWithString(KB_EDITOR, OnInputBind, "CTRL+SHIFT+O");
 		s_Api->InputBinds_RegisterWithString(KB_LOCK, OnInputBind, "CTRL+SHIFT+L");
+		s_Api->InputBinds_RegisterWithString(KB_COPY, OnInputBind, "CTRL+SHIFT+K");
 		s_Api->GUI_Register(RT_Render, OnRender);
 		s_Api->GUI_Register(RT_OptionsRender, OnOptions);
 		s_Api->GUI_RegisterCloseOnEscape(Ui::kWindowName, &Ui::ShowWindow);
 		s_Api->GUI_RegisterCloseOnEscape(OrderUi::kEditorName, &OrderUi::ShowEditor);
 		s_Api->QuickAccess_AddContextMenu(QA_MENU_ITEM, "QA_MENU", OnQuickAccessMenu);
 
+		Notify::Init();
+		OrderUi::StandingBanner = OnStandingBanner;
 		s_Api->Log(LOGL_INFO, ADDON_NAME, "Loaded.");
 	}
 
@@ -255,10 +304,13 @@ namespace
 		s_Api->GUI_DeregisterCloseOnEscape(Ui::kWindowName);
 		s_Api->GUI_Deregister(OnOptions);
 		s_Api->GUI_Deregister(OnRender);
+		s_Api->InputBinds_Deregister(KB_COPY);
 		s_Api->InputBinds_Deregister(KB_LOCK);
 		s_Api->InputBinds_Deregister(KB_EDITOR);
 		s_Api->InputBinds_Deregister(KB_MARK);
 		s_Api->InputBinds_Deregister(KB_TOGGLE);
+		OrderUi::StandingBanner = nullptr;
+		Notify::Shutdown();
 		s_Api->WndProc_Deregister(OnWndProc);
 
 		s_Api->Events_Unsubscribe(EV_UE_CHAT, OnUeChatMessage);

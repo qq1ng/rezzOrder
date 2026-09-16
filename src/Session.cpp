@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cctype>
 
+#include "Share.h"
+
 namespace Rezz
 {
 	namespace
@@ -85,6 +87,49 @@ namespace Rezz
 	{
 		const std::vector<std::string>& order = m_Tracker.Order();
 		return std::find(order.begin(), order.end(), aAccount) != order.end();
+	}
+
+	std::string Session::Named(const std::string& aAccount) const
+	{
+		const std::vector<std::string>& order = m_Tracker.Order();
+		auto it = std::find(order.begin(), order.end(), aAccount);
+		std::string name = DisplayAccount(aAccount);
+		if (it == order.end()) { return name; }
+		return std::to_string(it - order.begin() + 1) + ". " + name;
+	}
+
+	int Session::SelfPlace() const
+	{
+		if (m_SelfAccount.empty()) { return 0; }
+		const std::vector<std::string>& order = m_Tracker.Order();
+		auto it = std::find(order.begin(), order.end(), m_SelfAccount);
+		return it == order.end() ? 0 : static_cast<int>(it - order.begin()) + 1;
+	}
+
+	// Taking over somebody else's order can move us in it, and where we stand is the one thing about the
+	// order that has to reach us without looking.
+	std::string Session::PlaceChange(int aPlaceBefore) const
+	{
+		int now = SelfPlace();
+		if (now == aPlaceBefore) { return {}; }
+		if (now == 0) { return " - you are not in it any more"; }
+		if (aPlaceBefore == 0) { return " - you are now " + std::to_string(now) + "."; }
+		return " - you are now " + std::to_string(now) + ". (was " + std::to_string(aPlaceBefore) + ".)";
+	}
+
+	int Session::SelfStanding(uint64_t aNowMs) const
+	{
+		if (m_SelfAccount.empty()) { return 0; }
+		TurnView turn = m_Tracker.GetTurn(aNowMs);
+		if (turn.UpIndex >= 0 && turn.Rows[turn.UpIndex].Account == m_SelfAccount) { return 1; }
+		if (turn.BackupIndex >= 0 && turn.Rows[turn.BackupIndex].Account == m_SelfAccount) { return 2; }
+		return 0;
+	}
+
+	std::string Session::StandingChange(int aBefore, int aAfter) const
+	{
+		if (aAfter == aBefore || aAfter == 0) { return {}; }
+		return aAfter == 1 ? " - you are up now" : " - you are the backup now";
 	}
 
 	void Session::Notify(NoticeKind aKind, const std::string& aAccount, std::string aText)
@@ -239,10 +284,11 @@ namespace Rezz
 		{
 			m_Agents.erase(aUpdate.Id);
 			member.OnMap = false;
+			int standing = SelfStanding(aNowMs);
 			m_Tracker.SetAway(aNowMs, account, true);
 			if (!isSelf && member.InSquad && InOrder(account))
 			{
-				m_PendingLeaves.push_back(PendingLeave{ account, aNowMs, member.Profession });
+				m_PendingLeaves.push_back(PendingLeave{ account, aNowMs, member.Profession, standing });
 			}
 			return;
 		}
@@ -266,13 +312,13 @@ namespace Rezz
 		if (changed)
 		{
 			// A different profession is a different skill bar: the old revive skill state no longer applies.
-			std::string text = DisplayAccount(account) + " swapped to " + ProfessionShortName(member.Profession);
+			std::string text = Named(account) + " swapped to " + ProfessionShortName(member.Profession);
 			if (!IsReviveProfession(member.Profession)) { text += " (no revive skill)"; }
 			Notify(NoticeKind::ChangedProfession, account, text);
 		}
 		else if (m_Reported.count(account))
 		{
-			Notify(NoticeKind::Returned, account, DisplayAccount(account) + " is back (" + ProfessionShortName(member.Profession) + ")");
+			Notify(NoticeKind::Returned, account, Named(account) + " is back (" + ProfessionShortName(member.Profession) + ")");
 		}
 		m_Reported.erase(account);
 	}
@@ -293,11 +339,14 @@ namespace Rezz
 		if (inSquad || member.IsSelf || aRole != SquadRole::None) { return; } // invited/applied: not a leave
 
 		// Left the squad: known at once, ~2.7 s before arcdps removes them.
+		int standing = SelfStanding(aNowMs);
 		m_Tracker.SetAway(aNowMs, aAccount, true);
 		std::erase_if(m_PendingLeaves, [&](const PendingLeave& aLeave) { return aLeave.Account == aAccount; });
 		if (InOrder(aAccount) && !m_Reported.count(aAccount))
 		{
-			Notify(NoticeKind::LeftSquad, aAccount, DisplayAccount(aAccount) + " left the squad");
+			// Somebody ahead of us dropping out is how the turn reaches us without anyone casting.
+			Notify(NoticeKind::LeftSquad, aAccount, Named(aAccount) + " left the squad" +
+				StandingChange(standing, SelfStanding(aNowMs)));
 			m_Reported[aAccount] = true;
 		}
 	}
@@ -310,6 +359,8 @@ namespace Rezz
 		m_Tracker.SetOrder({});
 		m_PendingLeaves.clear();
 		m_Reported.clear();
+		ClearRequest();
+		DismissShare();
 		Notify(NoticeKind::OrderCleared, m_SelfAccount, "You left the squad: revive order cleared");
 	}
 
@@ -326,7 +377,7 @@ namespace Rezz
 			{
 				auto it = m_Roster.find(account);
 				if (it == m_Roster.end() || it->second.OnMap || it->second.IsSelf || m_Reported.count(account)) { continue; }
-				Notify(NoticeKind::LeftMap, account, DisplayAccount(account) + " is not on the map");
+				Notify(NoticeKind::LeftMap, account, Named(account) + " left while you were loading");
 				m_Reported[account] = true;
 			}
 		}
@@ -339,7 +390,8 @@ namespace Rezz
 
 			auto it = m_Roster.find(leave.Account);
 			if (it == m_Roster.end() || it->second.OnMap || !InOrder(leave.Account) || m_Reported.count(leave.Account)) { continue; }
-			Notify(NoticeKind::LeftMap, leave.Account, DisplayAccount(leave.Account) + " left the map");
+			Notify(NoticeKind::LeftMap, leave.Account, Named(leave.Account) + " left the map" +
+				StandingChange(leave.OurStanding, SelfStanding(aNowMs)));
 			m_Reported[leave.Account] = true;
 		}
 	}
@@ -347,11 +399,110 @@ namespace Rezz
 	void Session::SetOrder(std::vector<std::string> aAccounts)
 	{
 		m_Tracker.SetOrder(std::move(aAccounts));
+		m_OrderFrom.clear();
+	}
+
+	void Session::SetAnswerRule(AnswerRule aRule)
+	{
+		m_AnswerRule = aRule;
+	}
+
+	void Session::SetShareRules(bool aFromLeaders, bool aFromAnyone)
+	{
+		m_ShareFromLeaders = aFromLeaders;
+		m_ShareFromAnyone = aFromAnyone;
+	}
+
+	void Session::OnChatMessage(const std::string& aAccount, const std::string& aText, uint64_t aNowMs)
+	{
+		Share::Message message = Share::Parse(aText);
+		if (message.What == Share::Kind::None) { return; }
+		if (!aAccount.empty() && aAccount == m_SelfAccount) { return; } // our own paste
+
+		std::string name = DisplayAccount(aAccount);
+		if (message.What == Share::Kind::Request)
+		{
+			// Someone joined late and asked. Only a client that has an order can answer.
+			// Only a client that has an order can answer one.
+			if (m_Tracker.Order().empty()) { return; }
+			m_RequestFrom = aAccount;
+			m_RequestAtMs = aNowMs;
+			Notify(NoticeKind::ShareRequested, aAccount, name + " asked for the revive order");
+			return;
+		}
+
+		std::vector<RosterMember> roster;
+		roster.reserve(m_Roster.size());
+		for (const auto& [account, member] : m_Roster) { roster.push_back(member); }
+		Share::Resolved resolved = Share::Resolve(message.Names, roster);
+		if (resolved.Accounts.empty()) { return; }
+
+		SquadRole role = SquadRole::Unknown;
+		if (auto it = m_Roster.find(aAccount); it != m_Roster.end()) { role = it->second.Role; }
+
+		std::string what = name + " shared a revive order (" + std::to_string(resolved.Accounts.size()) + " players)";
+		if (!resolved.Unknown.empty()) { what += ", " + std::to_string(resolved.Unknown.size()) + " not in the squad"; }
+
+		// The squad's own leadership may set the order without being asked; anyone else has to be let in.
+		bool trusted = m_ShareFromAnyone ||
+			(m_ShareFromLeaders && (role == SquadRole::Leader || role == SquadRole::Lieutenant));
+		// Somebody answered a question that was going round the squad: nobody else needs to.
+		ClearRequest();
+
+		if (trusted)
+		{
+			int before = SelfPlace();
+			SetOrder(resolved.Accounts);
+			m_OrderFrom = aAccount;
+			m_HasShare = false;
+			Notify(NoticeKind::ShareApplied, aAccount, what + PlaceChange(before));
+			return;
+		}
+
+		m_Share = SharedOrder{ aAccount, role, resolved.Accounts, resolved.Unknown, SelfPlace(), 0, aNowMs };
+		auto mine = std::find(resolved.Accounts.begin(), resolved.Accounts.end(), m_SelfAccount);
+		m_Share.OurPlaceThen = mine == resolved.Accounts.end() ? 0
+			: static_cast<int>(mine - resolved.Accounts.begin()) + 1;
+		m_HasShare = true;
+		Notify(NoticeKind::ShareOffered, aAccount, what);
+	}
+
+	void Session::AcceptShare()
+	{
+		if (!m_HasShare) { return; }
+		int before = SelfPlace();
+		SetOrder(m_Share.Accounts);
+		m_OrderFrom = m_Share.From;
+		m_HasShare = false;
+		Notify(NoticeKind::ShareApplied, m_Share.From, "using " + DisplayAccount(m_Share.From) + "'s revive order (" +
+			std::to_string(m_Share.Accounts.size()) + " players)" + PlaceChange(before));
+	}
+
+	void Session::DismissShare()
+	{
+		m_HasShare = false;
+		m_Share = SharedOrder{};
+	}
+
+	void Session::ClearRequest()
+	{
+		m_RequestFrom.clear();
+		m_RequestAtMs = 0;
 	}
 
 	SessionView Session::GetView(uint64_t aNowMs) const
 	{
 		SessionView view;
+		view.HasShare = m_HasShare;
+		view.Share = m_Share;
+		// An unanswered request stops asking after a while: by then the squad has moved on.
+		// Only the client the order belongs to is asked to answer, so one question doesn't open a window on
+		// every screen in the squad.
+		bool answers = m_AnswerRule == AnswerRule::Always ||
+			(m_AnswerRule == AnswerRule::WhenOrderIsOurs && OrderIsOurs());
+		view.HasRequest = answers && !m_RequestFrom.empty() && aNowMs < m_RequestAtMs + kRequestShowMs &&
+			!m_Tracker.Order().empty();
+		if (view.HasRequest) { view.RequestFrom = m_RequestFrom; }
 		view.Turn = m_Tracker.GetTurn(aNowMs);
 		view.BackupIndex = view.Turn.BackupIndex;
 		view.Order = m_Tracker.Order();

@@ -39,7 +39,22 @@ namespace Rezz
 	};
 
 	// OrderCleared: we left the squad, so the order (which belongs to that squad) was removed.
-	enum class NoticeKind : uint8_t { LeftSquad, LeftMap, Returned, ChangedProfession, OrderCleared };
+	// ShareApplied: someone's shared order was taken over. ShareOffered: it is waiting for us to accept it.
+	// ShareRequested: somebody asked the squad for the order.
+	enum class NoticeKind : uint8_t { LeftSquad, LeftMap, Returned, ChangedProfession, OrderCleared,
+		ShareApplied, ShareOffered, ShareRequested };
+
+	// A revive order somebody sent in squad chat.
+	struct SharedOrder
+	{
+		std::string              From;                        // account of the sender, with the leading ':'
+		SquadRole                FromRole = SquadRole::Unknown;
+		std::vector<std::string> Accounts;                    // resolved against our own squad roster
+		std::vector<std::string> Unknown;                     // names in the message we could not place
+		int                      OurPlaceNow  = 0;            // 1-based place in the order we have, 0 not in it
+		int                      OurPlaceThen = 0;            // ... and in the one being offered
+		uint64_t                 TimeMs   = 0;
+	};
 
 	struct Notice
 	{
@@ -57,6 +72,10 @@ namespace Rezz
 		bool                      SquadInCombat = false;
 		uint64_t                  NowMs         = 0;
 		std::string               SelfAccount;
+		bool                      HasShare = false;   // a shared order is waiting to be accepted
+		SharedOrder               Share;
+		bool                      HasRequest = false; // somebody asked us for the order
+		std::string               RequestFrom;        // their account, with the leading ':'
 	};
 
 	// True for professions that have an instant revive utility: guardian, warrior, ranger, elementalist,
@@ -81,6 +100,8 @@ namespace Rezz
 		static constexpr uint64_t kResyncAfterMs = 90 * 1000;
 		// No event from a player during a squad fight for this long: they are out of arcdps' range.
 		static constexpr uint64_t kOutOfRangeMs = 15 * 1000;
+		// A request for the order that nobody answered stops asking after this long.
+		static constexpr uint64_t kRequestShowMs = 60 * 1000;
 
 		// Squad channel combat event. aNowMs is the arrival time (timeGetTime), used only for roster timing;
 		// the tracker works in event time.
@@ -90,7 +111,25 @@ namespace Rezz
 		// Raises delayed notices. Call regularly (render thread).
 		void Tick(uint64_t aNowMs);
 
+		// The order as this client set it: ours to answer questions about.
 		void SetOrder(std::vector<std::string> aAccounts);
+		// Whether the order on screen was built here, rather than taken over from somebody else's share.
+		bool OrderIsOurs() const { return m_OrderFrom.empty(); }
+		// Our own place in the order, 1-based; 0 when we are not in it.
+		int SelfPlace() const;
+		// A squad chat message as Unofficial Extras reports it (account name with the leading ':').
+		void OnChatMessage(const std::string& aAccount, const std::string& aText, uint64_t aNowMs);
+		// Who may set the order for us without being asked. Leaders and lieutenants by default.
+		void SetShareRules(bool aFromLeaders, bool aFromAnyone);
+		// Takes over the order that is waiting, or throws it away.
+		void AcceptShare();
+		void DismissShare();
+		// The request for the order has been answered (or ignored).
+		void ClearRequest();
+		// Who gets asked to answer "!rezz?". Only the client whose order it is, by default: in a squad where
+		// everyone took the order from the commander, that is exactly one person.
+		enum class AnswerRule : uint8_t { Never = 0, WhenOrderIsOurs = 1, Always = 2 };
+		void SetAnswerRule(AnswerRule aRule);
 		const std::vector<std::string>& Order() const { return m_Tracker.Order(); }
 
 		SessionView GetView(uint64_t aNowMs) const;
@@ -110,6 +149,7 @@ namespace Rezz
 			std::string Account;
 			uint64_t    TimeMs;
 			uint32_t    Profession;
+			int         OurStanding; // where the turn stood before they dropped out
 		};
 
 		// Account of a squad player from an event's agent id, falling back to the map instance id when the
@@ -119,6 +159,14 @@ namespace Rezz
 		RosterMember& GetMember(const std::string& aAccount);
 		bool InOrder(const std::string& aAccount) const;
 		void Notify(NoticeKind aKind, const std::string& aAccount, std::string aText);
+		// "3. Gorath" for a player in the order, else just their name.
+		std::string Named(const std::string& aAccount) const;
+		// " - you are now 2. (was 4.)" when somebody else's order moves us, else empty.
+		std::string PlaceChange(int aPlaceBefore) const;
+		// Whose turn it is right now as far as we are concerned: 1 we are up, 2 we are the backup, 0 neither.
+		int SelfStanding(uint64_t aNowMs) const;
+		// " - you are up now" when somebody dropping out of the rotation moved the turn to us.
+		std::string StandingChange(int aBefore, int aAfter) const;
 		void OnSelfLeftSquad();
 
 		Tracker                                       m_Tracker;
@@ -133,5 +181,13 @@ namespace Rezz
 		uint64_t                                      m_ResyncAtMs      = 0;
 		bool                                          m_HasRoles        = false; // Unofficial Extras is reporting
 		uint64_t                                      m_CombatSinceMs   = 0; // 0: squad not in combat
+		SharedOrder                                   m_Share;
+		bool                                          m_HasShare        = false;
+		std::string                                   m_RequestFrom;
+		uint64_t                                      m_RequestAtMs     = 0;
+		std::string                                   m_OrderFrom;   // empty: we built this order ourselves
+		AnswerRule                                    m_AnswerRule   = AnswerRule::WhenOrderIsOurs;
+		bool                                          m_ShareFromLeaders = true;
+		bool                                          m_ShareFromAnyone  = false;
 	};
 }

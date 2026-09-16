@@ -246,17 +246,27 @@ namespace Rezz
 			bool anyReady = player.Skills.empty();
 			bool confirmed = false;
 			uint64_t soonestReady = UINT64_MAX;
+			ReviveGroup soonestGroup = ReviveGroup::Count;
 			for (const SkillStatus& skill : player.Skills)
 			{
 				bool stuck = skill.State == SkillState::Casting && aNowMs > skill.CastStartMs + kStuckCastMs;
 				confirmed = confirmed || skill.Confirmed;
 				if (skill.State == SkillState::Casting && !stuck) { casting = true; }
 				else if (skill.State == SkillState::Ready || skill.ReadyAtMs <= aNowMs) { anyReady = true; }
-				else { soonestReady = std::min(soonestReady, skill.ReadyAtMs); }
+				else if (skill.ReadyAtMs < soonestReady) { soonestReady = skill.ReadyAtMs; soonestGroup = skill.Group; }
 			}
 			if (casting) { row.Status = Eligibility::Casting; }
 			else if (anyReady) { row.Status = Eligibility::Ready; }
-			else { row.Status = Eligibility::Cooldown; row.ReadyInMs = soonestReady - aNowMs; }
+			else
+			{
+				row.Status = Eligibility::Cooldown;
+				row.ReadyInMs = soonestReady - aNowMs;
+				// How long that recharge is in full, so the UI can show how far along it is.
+				if (soonestGroup != ReviveGroup::Count)
+				{
+					row.RechargeMs = static_cast<uint64_t>(GetGroupInfo(soonestGroup).WvwRechargeS) * 1000;
+				}
+			}
 			row.Unconfirmed = row.Status == Eligibility::Ready && !confirmed &&
 				(player.SeenSinceMs == 0 || aNowMs < player.SeenSinceMs + kConfirmAfterMs);
 		}

@@ -53,6 +53,46 @@ namespace Live
 		}
 	}
 
+	void OnChatMessage(const SquadMessageInfo* aMessage)
+	{
+		if (aMessage == nullptr || aMessage->AccountName == nullptr || aMessage->Text == nullptr) { return; }
+		std::string account = aMessage->AccountName;
+		std::string text(aMessage->Text, static_cast<size_t>(aMessage->TextLength));
+		uint32_t now = timeGetTime();
+		std::scoped_lock lock(s_Mutex);
+		s_Session.OnChatMessage(account, text, now);
+	}
+
+	void SetShareRules(bool aFromLeaders, bool aFromAnyone)
+	{
+		std::scoped_lock lock(s_Mutex);
+		s_Session.SetShareRules(aFromLeaders, aFromAnyone);
+	}
+
+	void SetAnswerRule(int aRule)
+	{
+		std::scoped_lock lock(s_Mutex);
+		s_Session.SetAnswerRule(static_cast<Rezz::Session::AnswerRule>(aRule));
+	}
+
+	void AcceptShare()
+	{
+		std::scoped_lock lock(s_Mutex);
+		s_Session.AcceptShare();
+	}
+
+	void DismissShare()
+	{
+		std::scoped_lock lock(s_Mutex);
+		s_Session.DismissShare();
+	}
+
+	void ClearRequest()
+	{
+		std::scoped_lock lock(s_Mutex);
+		s_Session.ClearRequest();
+	}
+
 	void Tick()
 	{
 		uint32_t now = timeGetTime();

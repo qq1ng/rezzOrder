@@ -9,17 +9,26 @@
 #include "imgui/imgui.h"
 
 #include "ArcStyle.h"
+#include "Demo.h"
 #include "Fonts.h"
 #include "Icons.h"
 #include "Live.h"
+#include "Notify.h"
 #include "Settings.h"
+#include "Share.h"
 
 namespace OrderUi
 {
 	bool              ShowEditor = false;
+	FrameInfo         LastFrame;
+	FrameInfo         LastEditorFrame;
+	FrameInfo         LastShareFrame;
+	FrameInfo         LastRequestFrame;
 	std::atomic<bool> TextInputActive{false};
 	std::atomic<bool> EditorToggleRequested{false};
 	std::atomic<bool> LockToggleRequested{false};
+	std::atomic<bool> CopyOrderRequested{false};
+	void (*StandingBanner)(const std::string&) = nullptr;
 
 	namespace
 	{
@@ -32,6 +41,15 @@ namespace OrderUi
 		const ImVec4 kRed     { 1.00f, 0.35f, 0.35f, 1.0f };
 		const ImVec4 kDarkRed { 0.75f, 0.20f, 0.20f, 1.0f };
 		const ImVec4 kGrey    { 0.62f, 0.62f, 0.62f, 1.0f };
+		// Downed and dead players: they cannot revive anyone and they are not coming back into the rotation
+		// on their own, so they sink into the background instead of shouting in red.
+		const ImVec4 kDim     { 0.45f, 0.45f, 0.48f, 1.0f };
+		// Somebody else's turn is the same idea in a quieter shade: green at full strength always means the
+		// order has come round to you.
+		const ImVec4 kGreenOther { 0.52f, 0.72f, 0.54f, 1.0f };
+
+		ImU32 UpFill(bool aMine)  { return aMine ? IM_COL32(60, 185, 60, 130) : IM_COL32(58, 105, 68, 85); }
+		ImU32 UpEdge(bool aMine)  { return aMine ? IM_COL32(120, 240, 120, 245) : IM_COL32(95, 150, 105, 185); }
 
 		struct TimedNotice
 		{
@@ -40,7 +58,10 @@ namespace OrderUi
 		};
 
 		std::deque<TimedNotice> s_Notices;
+		unsigned s_LastNowMs = 0;
 		bool s_MenuOpen = false; // one of our popups was open last frame: keep taking input while it is
+		bool s_GripHeld = false; // the corner grip is being dragged
+		bool s_GripHot  = false; // ... or hovered: the window must not move out from under it
 
 		ImVec4 ProfessionColor(uint32_t aProfession)
 		{
@@ -148,17 +169,25 @@ namespace OrderUi
 		}
 
 		// Elite specialization icon tinted in the profession colour, like arcdps. Text while the icon loads.
-		void ProfessionIcon(const std::string& aAccount, const Rezz::RosterMember* aMember)
+		// Faded along with the rest of the row for a player who is out of the rotation.
+		ImVec4 IconTint(uint32_t aProfession, bool aDim)
+		{
+			ImVec4 color = ProfessionColor(aProfession);
+			if (aDim) { color.x *= 0.55f; color.y *= 0.55f; color.z *= 0.55f; color.w = 0.65f; }
+			return color;
+		}
+
+		void ProfessionIcon(const std::string& aAccount, const Rezz::RosterMember* aMember, bool aDim = false)
 		{
 			uint32_t profession = aMember ? aMember->Profession : 0;
 			float size = ImGui::GetTextLineHeight();
 			if (void* icon = Icons::Get(profession, aMember ? aMember->Elite : 0))
 			{
-				ImGui::Image(icon, ImVec2(size, size), ImVec2(0, 0), ImVec2(1, 1), ProfessionColor(profession));
+				ImGui::Image(icon, ImVec2(size, size), ImVec2(0, 0), ImVec2(1, 1), IconTint(profession, aDim));
 			}
 			else if (profession != 0)
 			{
-				ImGui::TextColored(ProfessionColor(profession), "%s", Rezz::ProfessionShortName(profession));
+				ImGui::TextColored(IconTint(profession, aDim), "%s", Rezz::ProfessionShortName(profession));
 			}
 			else
 			{
@@ -188,6 +217,13 @@ namespace OrderUi
 
 		void ApplyOrder(std::vector<std::string> aOrder)
 		{
+			// The demo squad is on screen with its own made-up players. Editing what is shown would write
+			// those names into the real order, so the demo is look-only.
+			if (Rezz::Demo::Running())
+			{
+				AddNotice("demo squad: stop the demo to change the real order", s_LastNowMs);
+				return;
+			}
 			Settings::Values& s = Settings::Current;
 			s.Order = std::move(aOrder);
 			Live::SetOrder(s.Order);
@@ -254,6 +290,84 @@ namespace OrderUi
 			ApplyOrder(order);
 		}
 
+		// Named orders: the same ten people run together every night, so the order is worth keeping.
+		void SavePreset(const std::string& aName, const std::vector<std::string>& aOrder)
+		{
+			if (aName.empty() || aOrder.empty()) { return; }
+			if (Rezz::Demo::Running())
+			{
+				AddNotice("demo squad: stop the demo before saving an order", s_LastNowMs);
+				return;
+			}
+			Settings::Current.Presets[aName] = aOrder;
+			Settings::MarkDirty();
+		}
+
+		// Type a name, press enter, and the order is kept under it.
+		void SavePresetField(const Rezz::SessionView& aView, const char* aId)
+		{
+			char buffer[48] = {};
+			ImGui::SetNextItemWidth(140);
+			ImGui::PushID(aId);
+			bool entered = ImGui::InputTextWithHint("##preset_name", "name...", buffer, sizeof(buffer),
+				ImGuiInputTextFlags_EnterReturnsTrue);
+			TextInputActive = TextInputActive || ImGui::IsItemActive();
+			ImGui::PopID();
+			if (entered) { SavePreset(buffer, aView.Order); }
+		}
+
+		void PresetMenu(const Rezz::SessionView& aView)
+		{
+			Settings::Values& s = Settings::Current;
+			if (!ImGui::BeginMenu("Saved orders")) { return; }
+			if (s.Presets.empty()) { ImGui::TextColored(kGrey, "none saved yet"); }
+			for (const auto& [name, accounts] : s.Presets)
+			{
+				ImGui::PushID(name.c_str());
+				if (ImGui::MenuItem(name.c_str(), std::to_string(accounts.size()).c_str())) { ApplyOrder(accounts); }
+				if (ImGui::BeginPopupContextItem("preset_menu"))
+				{
+					if (ImGui::MenuItem("Delete")) { s.Presets.erase(name); Settings::MarkDirty(); ImGui::EndPopup(); ImGui::PopID(); break; }
+					ImGui::EndPopup();
+				}
+				ImGui::PopID();
+			}
+			if (!aView.Order.empty())
+			{
+				ImGui::Separator();
+				ImGui::TextColored(kGrey, "save this order as:");
+				SavePresetField(aView, "menu");
+			}
+			ImGui::EndMenu();
+		}
+
+		// Addons cannot write in chat, so the line goes to the clipboard and the player pastes it.
+		// Takes the order explicitly, so the copy can include a player who is being added in the same click
+		// (the view still holds the order from before this frame).
+		void CopyOrderLine(const std::vector<std::string>& aOrder, const std::vector<Rezz::RosterMember>& aRoster)
+		{
+			if (aOrder.empty())
+			{
+				AddNotice("no order to share yet", s_LastNowMs);
+				return;
+			}
+			std::string line = Rezz::Share::Encode(aOrder, aRoster);
+			ImGui::SetClipboardText(line.c_str());
+			AddNotice("copied: " + line + " - paste it in squad chat", s_LastNowMs);
+			Live::ClearRequest();
+		}
+
+		void CopyOrder(const Rezz::SessionView& aView)
+		{
+			CopyOrderLine(aView.Order, aView.Roster);
+		}
+
+		void CopyOrderItem(const Rezz::SessionView& aView)
+		{
+			if (aView.Order.empty()) { return; }
+			if (ImGui::MenuItem("Copy order for squad chat", "Ctrl+Shift+K")) { CopyOrder(aView); }
+		}
+
 		void AddPlayerMenu(const Rezz::SessionView& aView)
 		{
 			if (!ImGui::BeginMenu("Add player")) { return; }
@@ -276,24 +390,16 @@ namespace OrderUi
 			return aStatus == Rezz::Eligibility::Ready || aStatus == Rezz::Eligibility::Casting;
 		}
 
+		// Whether this player still has a part to play: a recharging skill comes back and their turn comes
+		// round again, while a downed, dead or absent player is simply skipped.
+		bool IsRelevant(Rezz::Eligibility aStatus)
+		{
+			return IsAvailable(aStatus) || aStatus == Rezz::Eligibility::Cooldown;
+		}
+
 		std::string SecondsText(uint64_t aMs)
 		{
 			return std::to_string((aMs + 999) / 1000) + "s";
-		}
-
-		void StatusText(const Rezz::OrderRow& aRow)
-		{
-			switch (aRow.Status)
-			{
-				// "ready?": nothing of theirs has been seen yet, so the skill could have been used just
-				// before we could watch them (we joined, or they came back).
-				case Rezz::Eligibility::Ready:    ImGui::TextColored(kGreen, aRow.Unconfirmed ? "ready?" : "ready"); break;
-				case Rezz::Eligibility::Casting:  ImGui::TextColored(kYellow, "casting"); break;
-				case Rezz::Eligibility::Cooldown: ImGui::TextColored(kGrey, "%s", SecondsText(aRow.ReadyInMs).c_str()); break;
-				case Rezz::Eligibility::Downed:   ImGui::TextColored(kRed, "DOWN"); break;
-				case Rezz::Eligibility::Dead:     ImGui::TextColored(kDarkRed, "DEAD"); break;
-				case Rezz::Eligibility::Away:     ImGui::TextColored(kGrey, "away"); break;
-			}
 		}
 
 		// Laid out like the options menu of an arcdps window: checkboxes, then a value box with its label.
@@ -323,22 +429,46 @@ namespace OrderUi
 			*aValue = static_cast<float>(value);
 		}
 
+		// The three shapes the turn window can take, in the order they were drawn as mockups.
+		void LayoutOptions()
+		{
+			Settings::Values& s = Settings::Current;
+			static const char* kNames[] = { "compact list", "big bars", "focus card", "horizontal strip" };
+			int layout = static_cast<int>(s.Layout);
+			ImGui::SetNextItemWidth(120);
+			if (ImGui::Combo("layout", &layout, kNames, IM_ARRAYSIZE(kNames)))
+			{
+				s.Layout = static_cast<Settings::OverlayLayout>(layout);
+				Settings::MarkDirty();
+			}
+			Toggle("recharge bar", &s.CooldownBar);
+			Toggle("recharge seconds", &s.CooldownSeconds);
+		}
+
+		// Every setting of the turn window, in one place. The right-click menu and the Nexus options page
+		// both show this, so there is one control per thing and no two of them can disagree.
 		void WindowOptions()
 		{
 			Settings::Values& s = Settings::Current;
-			Toggle("title bar", &s.OverlayTitleBar);
-			Toggle("scroll bar", &s.OverlayScrollBar);
-			Toggle("background", &s.OverlayBackground);
+			LayoutOptions();
+			ImGui::Separator();
+			Toggle("show the window", &s.OverlayVisible);
 			Toggle("locked (click-through)", &s.OverlayLocked);
 			Toggle("only in WvW", &s.OverlayOnlyWvw);
-			ValueFloat("window width", &s.OverlayWidth, 0, 2000);
-			if (s.OverlayScrollBar) { ValueFloat("window height", &s.OverlayHeight, 40, 2000); }
-			ValueInt("max name length", &s.OverlayMaxNameLength, 0, 40);
-			ValueInt("max displayed", &s.OverlayMaxRows, 0, 50);
+			Toggle("title bar", &s.OverlayTitleBar);
+			Toggle("background", &s.OverlayBackground);
 			ImGui::SetNextItemWidth(120);
 			if (ImGui::SliderFloat("background alpha", &s.OverlayBgAlpha, 0.0f, 1.0f, "%.2f")) { Settings::MarkDirty(); }
+			// One size control: with no width set this scales the whole window, which is what dragging the
+			// corner grip does as well.
 			ImGui::SetNextItemWidth(120);
-			if (ImGui::SliderFloat("text size", &s.OverlayScale, 0.7f, 2.5f, "%.1f")) { Settings::MarkDirty(); }
+			if (ImGui::SliderFloat("size", &s.OverlayScale, 0.7f, 2.5f, "%.1f")) { Settings::MarkDirty(); }
+			ImGui::Separator();
+			// A width is a floor, not a cage: the window still grows when the text needs the room, so nothing
+			// is ever cut off at a bigger size.
+			ValueFloat("least width (0: fit)", &s.OverlayWidth, 0, 2000);
+			ValueInt("max name length", &s.OverlayMaxNameLength, 0, 40);
+			ValueInt("max displayed", &s.OverlayMaxRows, 0, 50);
 		}
 
 		// Like an arcdps window: right-click > style > the options.
@@ -354,6 +484,8 @@ namespace OrderUi
 			if (!ImGui::BeginPopupContextWindow("overlay_menu")) { return false; }
 			AddMeItem(aView);
 			AddPlayerMenu(aView);
+			PresetMenu(aView);
+			CopyOrderItem(aView);
 			if (ImGui::MenuItem("Open order editor")) { ShowEditor = true; }
 			if (ImGui::MenuItem("Hide overlay")) { Settings::Current.OverlayVisible = false; Settings::MarkDirty(); }
 			ImGui::Separator();
@@ -362,38 +494,770 @@ namespace OrderUi
 			return true;
 		}
 
+		// ------------------------------------------------------------------ shared row drawing
+		//
+		// The three layouts (compact list, big bars, focus card) differ only in how a row is drawn. Names,
+		// icons, markers, the drag handle and the row menu are shared, so a change to any of them shows up
+		// in all three.
+
+		// A font at a size other than the overlay's own. Fonts::Pop() resets the window font scale, so the
+		// overlay font has to be pushed again afterwards.
+		struct FontRef
+		{
+			ImFont* Font = nullptr;
+			float   Size = 0.0f;
+
+			ImVec2 Measure(const char* aText) const { return Font->CalcTextSizeA(Size, FLT_MAX, 0.0f, aText); }
+		};
+
+		FontRef PickFont(float aScale, bool aBig = false)
+		{
+			float base = Settings::Current.OverlayScale;
+			Fonts::Pop();
+			Fonts::Push(base * aScale, aBig);
+			FontRef ref{ ImGui::GetFont(), ImGui::GetFontSize() };
+			Fonts::Pop();
+			Fonts::Push(base);
+			return ref;
+		}
+
+		void DrawText(const FontRef& aFont, ImVec2 aPos, const ImVec4& aColor, const char* aText)
+		{
+			ImGui::GetWindowDrawList()->AddText(aFont.Font, aFont.Size, aPos, ImGui::GetColorU32(aColor), aText);
+		}
+
+		// Everything the layouts need about the frame being drawn.
+		struct Frame
+		{
+			const Rezz::SessionView* View        = nullptr;
+			const RosterIndex*       Roster      = nullptr;
+			std::vector<std::string> Names;                  // display names, already shortened
+			int                      SelfIndex   = -1;
+			bool                     Interactive = false;
+			bool                     EditMode    = false;
+			bool                     MenuOpen    = false;     // a row menu is open: keep taking input
+			float                    Line        = 0.0f;      // text line height at the overlay's font
+			float                    Space       = 0.0f;      // gap between columns
+		};
+
+		const Rezz::OrderRow& Row(const Frame& aFrame, int aIndex) { return aFrame.View->Turn.Rows[aIndex]; }
+
+		const Rezz::RosterMember* Member(const Frame& aFrame, int aIndex)
+		{
+			return Find(*aFrame.Roster, Row(aFrame, aIndex).Account);
+		}
+
+		bool IsUp(const Frame& aFrame, int aIndex)     { return aIndex == aFrame.View->Turn.UpIndex; }
+		bool IsBackup(const Frame& aFrame, int aIndex) { return aIndex == aFrame.View->BackupIndex; }
+
+		ImVec4 NameColor(const Frame& aFrame, int aIndex)
+		{
+			const Rezz::OrderRow& row = Row(aFrame, aIndex);
+			if (row.Account == aFrame.View->SelfAccount) { return kYellow; }
+			return IsRelevant(row.Status) ? ImGui::GetStyleColorVec4(ImGuiCol_Text) : kDim;
+		}
+
+		// "ready", "ready?" (nothing of theirs seen yet), "casting", "63s", "DOWN", "DEAD", "away".
+		// Empty while a cooldown is only shown as a bar.
+		std::string StatusLabel(const Rezz::OrderRow& aRow)
+		{
+			switch (aRow.Status)
+			{
+				case Rezz::Eligibility::Ready:    return aRow.Unconfirmed ? "ready?" : "ready";
+				case Rezz::Eligibility::Casting:  return "casting";
+				case Rezz::Eligibility::Cooldown: return Settings::Current.CooldownSeconds ? SecondsText(aRow.ReadyInMs) : std::string();
+				case Rezz::Eligibility::Downed:   return "DOWN";
+				case Rezz::Eligibility::Dead:     return "DEAD";
+				case Rezz::Eligibility::Away:     return "away";
+			}
+			return {};
+		}
+
+		ImVec4 StatusColor(const Rezz::OrderRow& aRow)
+		{
+			switch (aRow.Status)
+			{
+				case Rezz::Eligibility::Ready:    return kGreen;
+				case Rezz::Eligibility::Casting:  return kYellow;
+				case Rezz::Eligibility::Cooldown: return kRed;   // counts down back into the rotation
+				default: return kDim;                            // downed, dead, away: out of it
+			}
+		}
+
+		std::string MarkerLabel(const Frame& aFrame, int aIndex)
+		{
+			if (IsUp(aFrame, aIndex)) { return "UP"; }
+			if (IsBackup(aFrame, aIndex)) { return "BK"; }
+			return std::to_string(aIndex + 1);
+		}
+
+		ImVec4 MarkerColor(const Frame& aFrame, int aIndex)
+		{
+			if (IsUp(aFrame, aIndex)) { return aIndex == aFrame.SelfIndex ? kGreen : kGreenOther; }
+			if (IsBackup(aFrame, aIndex)) { return kOrange; }
+			return kGrey;
+		}
+
+		// How much of the recharge is left, 0 (ready) to 1 (just used).
+		float CooldownLeft(const Rezz::OrderRow& aRow)
+		{
+			if (aRow.Status != Rezz::Eligibility::Cooldown || aRow.RechargeMs == 0) { return 0.0f; }
+			float left = static_cast<float>(aRow.ReadyInMs) / static_cast<float>(aRow.RechargeMs);
+			return left < 0.0f ? 0.0f : (left > 1.0f ? 1.0f : left);
+		}
+
+		// The recharge as a bar that fills up as the skill comes back. Blue, so it is neither the green of
+		// "ready" nor the orange of the backup.
+		void CooldownFill(const Rezz::OrderRow& aRow, const ImVec2& aMin, const ImVec2& aMax, float aRounding)
+		{
+			if (!Settings::Current.CooldownBar) { return; }
+			float left = CooldownLeft(aRow);
+			if (left <= 0.0f) { return; }
+			ImDrawList* draw = ImGui::GetWindowDrawList();
+			draw->AddRectFilled(aMin, aMax, IM_COL32(255, 255, 255, 18), aRounding);
+			float width = (aMax.x - aMin.x) * (1.0f - left);
+			if (width < 1.0f) { return; }
+			draw->AddRectFilled(aMin, ImVec2(aMin.x + width, aMax.y), IM_COL32(64, 110, 160, 210), aRounding);
+		}
+
+		// Up and backup differ in fill, in the thickness of the left edge and in their label, so they can be
+		// told apart without seeing colour. Our own row is marked on the right.
+		void HighlightRow(const Frame& aFrame, int aIndex, const ImVec2& aMin, const ImVec2& aMax, float aRounding)
+		{
+			ImDrawList* draw = ImGui::GetWindowDrawList();
+			bool up = IsUp(aFrame, aIndex);
+			bool backup = IsBackup(aFrame, aIndex);
+			bool mine = aIndex == aFrame.SelfIndex;
+			if (up || backup)
+			{
+				draw->AddRectFilled(aMin, aMax, up ? UpFill(mine) : IM_COL32(200, 130, 30, mine ? 95 : 65), aRounding);
+				float edge = up ? 3.0f : 1.0f;
+				draw->AddRectFilled(ImVec2(aMin.x - 2, aMin.y), ImVec2(aMin.x - 2 + edge, aMax.y),
+					up ? UpEdge(mine) : IM_COL32(240, 170, 60, mine ? 220 : 160));
+			}
+			if (mine)
+			{
+				draw->AddRectFilled(ImVec2(aMax.x - 2, aMin.y), ImVec2(aMax.x, aMax.y), IM_COL32(255, 230, 77, 200));
+			}
+		}
+
+		// Silent through a whole squad fight: they are out of the range arcdps reports on, so their state
+		// may be out of date.
+		bool OutOfRange(const Frame& aFrame, int aIndex)
+		{
+			const Rezz::RosterMember* member = Member(aFrame, aIndex);
+			return aFrame.View->SquadInCombat && member &&
+				aFrame.View->NowMs > member->LastEventMs + Rezz::Session::kOutOfRangeMs;
+		}
+
+		void RowMenu(Frame& aFrame, int aIndex)
+		{
+			if (!ImGui::BeginPopupContextItem("row_menu")) { return; }
+			aFrame.MenuOpen = true;
+			const Rezz::SessionView& view = *aFrame.View;
+			ImGui::TextColored(kGrey, "%s", aFrame.Names[aIndex].c_str());
+			ImGui::Separator();
+			if (ImGui::MenuItem("Remove player")) { RemoveFromOrder(view.Order, aIndex); }
+			NicknameMenu(Row(aFrame, aIndex).Account);
+			AddMeItem(view);
+			if (ImGui::MenuItem("Move up", nullptr, false, aIndex > 0)) { MoveInOrder(view.Order, aIndex, aIndex - 1); }
+			if (ImGui::MenuItem("Move down", nullptr, false, aIndex + 1 < static_cast<int>(view.Turn.Rows.size())))
+			{
+				MoveInOrder(view.Order, aIndex, aIndex + 1);
+			}
+			AddPlayerMenu(view);
+			if (ImGui::MenuItem("Open order editor")) { ShowEditor = true; }
+			ImGui::Separator();
+			StyleMenu();
+			ImGui::EndPopup();
+		}
+
+		// The whole row is the drag handle and opens the row menu. The visuals are drawn on top afterwards,
+		// so the cursor is left where the row started.
+		void RowInteraction(Frame& aFrame, int aIndex, const ImVec2& aSize)
+		{
+			if (!aFrame.Interactive) { return; }
+			ImVec2 rowPos = ImGui::GetCursorPos();
+			ImGui::InvisibleButton("row", aSize);
+			if (aFrame.EditMode && ImGui::BeginDragDropSource())
+			{
+				ImGui::SetDragDropPayload("REZZ_ORDER_ROW", &aIndex, sizeof(aIndex));
+				ImGui::TextUnformatted(aFrame.Names[aIndex].c_str());
+				ImGui::EndDragDropSource();
+			}
+			if (ImGui::BeginDragDropTarget())
+			{
+				if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("REZZ_ORDER_ROW"))
+				{
+					MoveInOrder(aFrame.View->Order, *static_cast<const int*>(payload->Data), aIndex);
+				}
+				ImGui::EndDragDropTarget();
+			}
+			if (aFrame.EditMode && ImGui::IsItemHovered())
+			{
+				ImGui::GetWindowDrawList()->AddRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), IM_COL32(255, 255, 255, 90));
+			}
+			AccountTooltip(Row(aFrame, aIndex).Account, Member(aFrame, aIndex));
+			RowMenu(aFrame, aIndex);
+			ImGui::SetCursorPos(rowPos);
+		}
+
+		void NoteRow(const Frame& aFrame, int aIndex)
+		{
+			const Rezz::OrderRow& row = Row(aFrame, aIndex);
+			std::string status = StatusLabel(row);
+			if (status.empty()) { status = SecondsText(row.ReadyInMs); } // the report always names the state
+			LastFrame.Rows.push_back(std::to_string(aIndex + 1) + ". " + MarkerLabel(aFrame, aIndex) + " " +
+				aFrame.Names[aIndex] + " " + status);
+		}
+
+		// "max displayed" shows a window of the order starting at whoever is up, so the rows that matter are
+		// the visible ones. The numbers keep each player's real place in the order.
+		std::vector<int> VisibleRows(const Frame& aFrame)
+		{
+			std::vector<int> rows;
+			int count = static_cast<int>(aFrame.View->Turn.Rows.size());
+			if (count == 0) { return rows; }
+			int max = Settings::Current.OverlayMaxRows;
+			int shown = max > 0 ? std::min(count, max) : count;
+			int first = max > 0 && aFrame.View->Turn.UpIndex >= 0 ? aFrame.View->Turn.UpIndex : 0;
+			for (int offset = 0; offset < shown; offset++) { rows.push_back((first + offset) % count); }
+			return rows;
+		}
+
+		// The line above the rows: our own state in big letters when it is ours to act on, otherwise who is up.
+		void CompactBanner(const Frame& aFrame, float aBannerHeight)
+		{
+			const Rezz::TurnView& turn = aFrame.View->Turn;
+			bool mine = aFrame.SelfIndex >= 0 && (IsUp(aFrame, aFrame.SelfIndex) || IsBackup(aFrame, aFrame.SelfIndex));
+			if (mine)
+			{
+				Fonts::Pop();
+				Fonts::Push(Settings::Current.OverlayScale, true);
+				bool up = IsUp(aFrame, aFrame.SelfIndex);
+				LastFrame.Banner = up ? "YOUR TURN" : "BACKUP";
+				ImGui::TextColored(up ? kGreen : kOrange, "%s", LastFrame.Banner.c_str());
+				Fonts::Pop();
+				Fonts::Push(Settings::Current.OverlayScale);
+				return;
+			}
+
+			ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (aBannerHeight - aFrame.Line) * 0.5f);
+			if (turn.UpIndex >= 0)
+			{
+				LastFrame.Banner = "Up: " + aFrame.Names[turn.UpIndex];
+				ImGui::TextColored(kGrey, "Up:");
+				ImGui::SameLine();
+				ImGui::TextUnformatted(aFrame.Names[turn.UpIndex].c_str());
+			}
+			else
+			{
+				LastFrame.Banner = "Nobody ready";
+				ImGui::TextColored(kRed, "Nobody ready");
+				if (turn.NextReadyIndex >= 0)
+				{
+					std::string wait = SecondsText(turn.Rows[turn.NextReadyIndex].ReadyInMs);
+					LastFrame.Banner += " - " + aFrame.Names[turn.NextReadyIndex] + " in " + wait;
+					ImGui::SameLine();
+					ImGui::TextColored(kGrey, "- %s in %s", aFrame.Names[turn.NextReadyIndex].c_str(), wait.c_str());
+				}
+			}
+		}
+
+		// ------------------------------------------------------------------ layout 1: compact list
+		//
+		// One text line per player: marker, icon, name, state. Every column is as wide as its widest possible
+		// value, so the window keeps one size while the states change.
+		float LayoutCompact(Frame& aFrame)
+		{
+			LastFrame.Layout = "compact";
+			const Rezz::TurnView& turn = aFrame.View->Turn;
+			float x0 = ImGui::GetCursorPosX();
+			float line = aFrame.Line;
+			float spacing = aFrame.Space;
+
+			float nameWidth = 0.0f;
+			for (const std::string& name : aFrame.Names) { nameWidth = std::max(nameWidth, ImGui::CalcTextSize(name.c_str()).x); }
+			float markerWidth = 0.0f;
+			for (const char* text : { "UP", "BK", "99" }) { markerWidth = std::max(markerWidth, ImGui::CalcTextSize(text).x); }
+			float statusWidth = 0.0f;
+			for (const char* text : { "ready?", "casting", "120s", "DOWN", "DEAD", "away" })
+			{
+				statusWidth = std::max(statusWidth, ImGui::CalcTextSize(text).x);
+			}
+			float iconX = x0 + markerWidth + spacing;
+			float nameX = iconX + line + spacing;
+			float statusX = nameX + nameWidth + spacing;
+
+			std::string longestName;
+			for (const std::string& name : aFrame.Names) { if (name.size() > longestName.size()) { longestName = name; } }
+			float nobodyWidth = ImGui::CalcTextSize(("Nobody ready - " + longestName + " in 120s").c_str()).x;
+			float contentWidth = std::max({ statusX + statusWidth - x0, nobodyWidth, ImGui::CalcTextSize("YOUR TURN").x * 1.5f });
+
+			// The banner line is always the height of the big font, so the window doesn't jump.
+			float bannerHeight = std::round(line * 1.5f);
+			ImVec2 bannerPos = ImGui::GetCursorPos();
+			CompactBanner(aFrame, bannerHeight);
+			ImGui::SetCursorPos(ImVec2(bannerPos.x, bannerPos.y + bannerHeight + ImGui::GetStyle().ItemSpacing.y));
+
+			for (int i : VisibleRows(aFrame))
+			{
+				const Rezz::OrderRow& row = turn.Rows[i];
+				ImGui::PushID(i);
+				ImVec2 rowPos = ImGui::GetCursorPos();
+				RowInteraction(aFrame, i, ImVec2(contentWidth, line));
+
+				ImVec2 min = ImGui::GetCursorScreenPos();
+				ImVec2 max(min.x + contentWidth, min.y + line);
+				CooldownFill(row, ImVec2(min.x, max.y - 2), max, 0.0f);
+				HighlightRow(aFrame, i, ImVec2(min.x - 1, min.y - 1), ImVec2(max.x + 3, max.y + 1), 2.0f);
+
+				ImGui::TextColored(MarkerColor(aFrame, i), "%s", MarkerLabel(aFrame, i).c_str());
+				if (OutOfRange(aFrame, i))
+				{
+					ImGui::SameLine(0, 2);
+					ImGui::TextColored(kGrey, "?");
+					if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenOverlapped))
+					{
+						ImGui::SetTooltip("no events from this player during the fight: out of range");
+					}
+				}
+
+				ImGui::SameLine(iconX);
+				ProfessionIcon(row.Account, Member(aFrame, i), !IsRelevant(row.Status));
+				ImGui::SameLine(nameX);
+				PlayerNameText(row.Account, aFrame.Names[i], NameColor(aFrame, i), Member(aFrame, i));
+				std::string status = StatusLabel(row);
+				if (!status.empty())
+				{
+					ImGui::SameLine(statusX);
+					ImGui::TextColored(StatusColor(row), "%s", status.c_str());
+				}
+				NoteRow(aFrame, i);
+
+				ImGui::SetCursorPos(ImVec2(rowPos.x, rowPos.y + line + ImGui::GetStyle().ItemSpacing.y));
+				ImGui::PopID();
+			}
+			return contentWidth;
+		}
+
+		// ------------------------------------------------------------------ layout 2: big bars
+		//
+		// A tall bar per player, like the native squad window: big icon and name, the recharge filling the
+		// bar from the left. Made to be read without looking straight at it.
+		float LayoutBars(Frame& aFrame)
+		{
+			LastFrame.Layout = "bars";
+			const Rezz::TurnView& turn = aFrame.View->Turn;
+			ImDrawList* draw = ImGui::GetWindowDrawList();
+			FontRef nameFont = PickFont(1.25f);
+			FontRef bigFont = PickFont(1.0f, true);
+
+			float line = aFrame.Line;
+			float pad = std::round(line * 0.5f);
+			float iconSize = std::round(line * 1.4f);
+			float rowHeight = std::max(std::round(line * 2.1f), iconSize + pad);
+			float gap = std::max(2.0f, std::round(line * 0.2f));
+
+			float nameWidth = 0.0f;
+			for (const std::string& name : aFrame.Names) { nameWidth = std::max(nameWidth, nameFont.Measure(name.c_str()).x); }
+			float markerWidth = 0.0f;
+			for (const char* text : { "UP", "BK", "99" }) { markerWidth = std::max(markerWidth, ImGui::CalcTextSize(text).x); }
+			float statusWidth = 0.0f;
+			for (const char* text : { "ready?", "casting", "120s", "DOWN", "DEAD", "away" })
+			{
+				statusWidth = std::max(statusWidth, ImGui::CalcTextSize(text).x);
+			}
+
+			float needed = pad + iconSize + pad + nameWidth + aFrame.Space * 2 + markerWidth + aFrame.Space + statusWidth + pad;
+
+			// The header is the part that gets read first, so the window is made wide enough for it: room for
+			// the longest name in the order at header size, whoever is up, plus the corner text. Sizing it
+			// for the longest rather than the current name keeps the window one width as the turn moves.
+			float headerNameWidth = 0.0f;
+			for (const std::string& name : aFrame.Names) { headerNameWidth = std::max(headerNameWidth, bigFont.Measure(name.c_str()).x); }
+			float cornerWidth = ImGui::CalcTextSize("you: 99.").x + aFrame.Space;
+			float headerNeeded = pad + nameFont.Measure("UP").x + aFrame.Space + bigFont.Size + aFrame.Space +
+				headerNameWidth + cornerWidth + pad;
+			float barWidth = std::max({ needed, headerNeeded, bigFont.Measure("YOUR TURN").x + pad * 2 + cornerWidth });
+
+			// Header, built like the focus card's: it carries the colour of what this means for us, so the
+			// top of the window answers "is this mine?" before any name is read.
+			ImVec2 bannerPos = ImGui::GetCursorScreenPos();
+			float bannerHeight = std::round(bigFont.Size * 1.35f);
+			bool mine = aFrame.SelfIndex >= 0 && IsUp(aFrame, aFrame.SelfIndex);
+			bool ours = aFrame.SelfIndex >= 0 && IsBackup(aFrame, aFrame.SelfIndex);
+			ImVec2 headerMax(bannerPos.x + barWidth, bannerPos.y + bannerHeight);
+			draw->AddRectFilled(bannerPos, headerMax, mine ? UpFill(true)
+				: ours ? IM_COL32(150, 95, 25, 110) : IM_COL32(40, 46, 52, 150), 3.0f);
+			draw->AddRect(bannerPos, headerMax, mine ? UpEdge(true)
+				: ours ? IM_COL32(240, 170, 60, 230) : IM_COL32(70, 76, 82, 190), 3.0f,
+				ImDrawCornerFlags_All, mine || ours ? 2.0f : 1.0f);
+
+			// Our own place sits in the corner and keeps its room, so a long name never runs into it.
+			std::string mineText;
+			if (aFrame.SelfIndex >= 0 && !mine)
+			{
+				mineText = "you: " + MarkerLabel(aFrame, aFrame.SelfIndex);
+				if (!ours) { mineText += "."; }
+			}
+			float mineWidth = mineText.empty() ? 0.0f : ImGui::CalcTextSize(mineText.c_str()).x + aFrame.Space;
+
+			float left = bannerPos.x + pad;
+			float room = barWidth - pad * 2 - mineWidth;
+			if (mine)
+			{
+				LastFrame.Banner = "YOUR TURN";
+				DrawText(bigFont, ImVec2(left, bannerPos.y + (bannerHeight - bigFont.Size) * 0.5f), kGreen, "YOUR TURN");
+			}
+			else if (turn.UpIndex >= 0)
+			{
+				LastFrame.Banner = "Up: " + aFrame.Names[turn.UpIndex];
+				const Rezz::RosterMember* upMember = Member(aFrame, turn.UpIndex);
+				DrawText(nameFont, ImVec2(left, bannerPos.y + (bannerHeight - nameFont.Size) * 0.5f), kGreenOther, "UP");
+				left += nameFont.Measure("UP").x + aFrame.Space;
+				if (void* icon = Icons::Get(upMember ? upMember->Profession : 0, upMember ? upMember->Elite : 0))
+				{
+					float size = bigFont.Size;
+					draw->AddImage(icon, ImVec2(left, bannerPos.y + (bannerHeight - size) * 0.5f),
+						ImVec2(left + size, bannerPos.y + (bannerHeight + size) * 0.5f), ImVec2(0, 0), ImVec2(1, 1),
+						ImGui::GetColorU32(IconTint(upMember ? upMember->Profession : 0, false)));
+					left += size + aFrame.Space;
+				}
+				// Whatever room is left after the icon and the corner text belongs to the name.
+				std::string name = aFrame.Names[turn.UpIndex];
+				float available = bannerPos.x + pad + room - left;
+				while (name.size() > 2 && bigFont.Measure(name.c_str()).x > available) { name.pop_back(); }
+				if (name != aFrame.Names[turn.UpIndex] && !name.empty()) { name.back() = '.'; }
+				DrawText(bigFont, ImVec2(left, bannerPos.y + (bannerHeight - bigFont.Size) * 0.5f),
+					ImGui::GetStyleColorVec4(ImGuiCol_Text), name.c_str());
+			}
+			else
+			{
+				LastFrame.Banner = "Nobody ready";
+				DrawText(bigFont, ImVec2(left, bannerPos.y + (bannerHeight - bigFont.Size) * 0.5f), kRed, "Nobody ready");
+			}
+			if (!mineText.empty())
+			{
+				DrawText(FontRef{ ImGui::GetFont(), ImGui::GetFontSize() },
+					ImVec2(headerMax.x - pad - ImGui::CalcTextSize(mineText.c_str()).x,
+						bannerPos.y + bannerHeight - aFrame.Line - pad * 0.4f),
+					ours ? kOrange : kYellow, mineText.c_str());
+			}
+			ImGui::Dummy(ImVec2(barWidth, bannerHeight));
+
+			for (int i : VisibleRows(aFrame))
+			{
+				const Rezz::OrderRow& row = turn.Rows[i];
+				const Rezz::RosterMember* member = Member(aFrame, i);
+				ImGui::PushID(i);
+				ImVec2 rowPos = ImGui::GetCursorPos();
+				RowInteraction(aFrame, i, ImVec2(barWidth, rowHeight));
+
+				ImVec2 min = ImGui::GetCursorScreenPos();
+				ImVec2 max(min.x + barWidth, min.y + rowHeight);
+				draw->AddRectFilled(min, max, IM_COL32(38, 42, 46, 190), 3.0f);
+				CooldownFill(row, min, max, 3.0f);
+				HighlightRow(aFrame, i, min, max, 3.0f);
+				if (IsUp(aFrame, i)) { draw->AddRect(min, max, UpEdge(i == aFrame.SelfIndex), 3.0f, ImDrawCornerFlags_All, 2.0f); }
+				else { draw->AddRect(min, max, IM_COL32(70, 76, 82, 200), 3.0f); }
+
+				float x = min.x + pad;
+				if (void* icon = Icons::Get(member ? member->Profession : 0, member ? member->Elite : 0))
+				{
+					draw->AddImage(icon, ImVec2(x, min.y + (rowHeight - iconSize) * 0.5f),
+						ImVec2(x + iconSize, min.y + (rowHeight + iconSize) * 0.5f), ImVec2(0, 0), ImVec2(1, 1),
+						ImGui::GetColorU32(IconTint(member ? member->Profession : 0, !IsRelevant(row.Status))));
+				}
+				x += iconSize + pad;
+				DrawText(nameFont, ImVec2(x, min.y + (rowHeight - nameFont.Size) * 0.5f), NameColor(aFrame, i),
+					aFrame.Names[i].c_str());
+
+				std::string status = StatusLabel(row);
+				float right = max.x - pad;
+				if (!status.empty())
+				{
+					ImVec2 size = ImGui::CalcTextSize(status.c_str());
+					DrawText(FontRef{ ImGui::GetFont(), ImGui::GetFontSize() },
+						ImVec2(right - size.x, min.y + (rowHeight - size.y) * 0.5f), StatusColor(row), status.c_str());
+					right -= statusWidth + aFrame.Space;
+				}
+				std::string marker = MarkerLabel(aFrame, i);
+				if (OutOfRange(aFrame, i)) { marker += "?"; }
+				ImVec2 markerSize = ImGui::CalcTextSize(marker.c_str());
+				DrawText(FontRef{ ImGui::GetFont(), ImGui::GetFontSize() },
+					ImVec2(right - markerSize.x, min.y + (rowHeight - markerSize.y) * 0.5f), MarkerColor(aFrame, i), marker.c_str());
+				NoteRow(aFrame, i);
+
+				ImGui::SetCursorPos(ImVec2(rowPos.x, rowPos.y + rowHeight + gap));
+				ImGui::PopID();
+			}
+			return barWidth;
+		}
+
+		// ------------------------------------------------------------------ layout 4: focus card
+		//
+		// Whoever is up fills a card at the top; everyone else is a queue underneath it, in reading order
+		// starting after the card. Made for a glance: one name, large.
+		float LayoutFocus(Frame& aFrame)
+		{
+			LastFrame.Layout = "focus";
+			const Rezz::TurnView& turn = aFrame.View->Turn;
+			ImDrawList* draw = ImGui::GetWindowDrawList();
+			FontRef hugeFont = PickFont(1.6f, true);
+			FontRef smallFont{ ImGui::GetFont(), ImGui::GetFontSize() };
+
+			float line = aFrame.Line;
+			float pad = std::round(line * 0.6f);
+			float cardHeight = std::round(hugeFont.Size * 1.35f + line * 1.6f);
+
+			// The queue wraps into up to three columns, so a big squad grows downwards slowly.
+			std::vector<int> visible = VisibleRows(aFrame);
+			std::vector<int> queue;
+			for (int i : visible) { if (!IsUp(aFrame, i)) { queue.push_back(i); } }
+			int columns = queue.size() > 4 ? 3 : 1;
+			// Every cell is laid out the same way, so the states line up in a column instead of following
+			// names of different lengths.
+			float queueNameWidth = 0.0f;
+			for (int i : queue) { queueNameWidth = std::max(queueNameWidth, ImGui::CalcTextSize(aFrame.Names[i].c_str()).x); }
+			float queueMarkerWidth = ImGui::CalcTextSize("99.").x;
+			float queueStatusX = queueMarkerWidth + aFrame.Space + line + aFrame.Space + queueNameWidth + aFrame.Space;
+			float cellWidth = queue.empty() ? 0.0f : queueStatusX + ImGui::CalcTextSize("ready?").x + aFrame.Space * 2;
+			float cardWidth = std::max(cellWidth * columns, hugeFont.Measure("YOUR TURN").x + pad * 2);
+
+			// The card.
+			int upIndex = turn.UpIndex;
+			ImVec2 cardPos = ImGui::GetCursorPos();
+			if (upIndex >= 0) { ImGui::PushID(upIndex); RowInteraction(aFrame, upIndex, ImVec2(cardWidth, cardHeight)); ImGui::PopID(); }
+			ImVec2 min = ImGui::GetCursorScreenPos();
+			ImVec2 max(min.x + cardWidth, min.y + cardHeight);
+			bool mine = aFrame.SelfIndex >= 0 && upIndex == aFrame.SelfIndex;
+			// Our turn colours the card green; being the backup colours it orange, so the card alone says
+			// whether this is about to be our problem.
+			bool ours = aFrame.SelfIndex >= 0 && IsBackup(aFrame, aFrame.SelfIndex);
+			ImU32 fill = mine ? IM_COL32(50, 150, 50, 110) : ours ? IM_COL32(150, 95, 25, 110) : IM_COL32(40, 46, 52, 190);
+			ImU32 edge = mine ? IM_COL32(120, 230, 120, 255) : ours ? IM_COL32(240, 170, 60, 230) : IM_COL32(90, 96, 102, 220);
+			draw->AddRectFilled(min, max, fill, 3.0f);
+			if (upIndex >= 0) { CooldownFill(turn.Rows[upIndex], min, max, 3.0f); }
+			draw->AddRect(min, max, edge, 3.0f, ImDrawCornerFlags_All, mine || ours ? 2.0f : 1.0f);
+
+			float textY = min.y + pad * 0.6f;
+			if (mine)
+			{
+				LastFrame.Banner = "YOUR TURN";
+				DrawText(hugeFont, ImVec2(min.x + pad, textY), kGreen, "YOUR TURN");
+			}
+			else if (upIndex >= 0)
+			{
+				LastFrame.Banner = "Up: " + aFrame.Names[upIndex];
+				float x = min.x + pad;
+				DrawText(smallFont, ImVec2(x, textY + (hugeFont.Size - smallFont.Size) * 0.5f), kGreen, "UP");
+				x += smallFont.Measure("UP").x + aFrame.Space;
+				const Rezz::RosterMember* member = Member(aFrame, upIndex);
+				if (void* icon = Icons::Get(member ? member->Profession : 0, member ? member->Elite : 0))
+				{
+					float size = std::round(hugeFont.Size * 0.85f);
+					draw->AddImage(icon, ImVec2(x, textY + (hugeFont.Size - size) * 0.5f), ImVec2(x + size, textY + (hugeFont.Size + size) * 0.5f),
+						ImVec2(0, 0), ImVec2(1, 1), ImGui::GetColorU32(ProfessionColor(member ? member->Profession : 0)));
+					x += size + aFrame.Space;
+				}
+				DrawText(hugeFont, ImVec2(x, textY), ImGui::GetStyleColorVec4(ImGuiCol_Text), aFrame.Names[upIndex].c_str());
+			}
+			else
+			{
+				LastFrame.Banner = "Nobody ready";
+				DrawText(hugeFont, ImVec2(min.x + pad, textY), kRed, "Nobody ready");
+			}
+
+			// Second line of the card: who takes over, and where we stand.
+			float secondY = min.y + cardHeight - line - pad * 0.5f;
+			std::string backup = aFrame.View->BackupIndex >= 0
+				? "backup: " + aFrame.Names[aFrame.View->BackupIndex]
+				: (turn.NextReadyIndex >= 0 ? "next: " + aFrame.Names[turn.NextReadyIndex] + " in " +
+					SecondsText(turn.Rows[turn.NextReadyIndex].ReadyInMs) : std::string("no backup ready"));
+			if (ours) { backup = "backup: you"; }
+			DrawText(smallFont, ImVec2(min.x + pad, secondY),
+				mine ? ImVec4(0.78f, 0.90f, 0.78f, 1.0f) : ours ? kOrange : kGrey, backup.c_str());
+			if (aFrame.SelfIndex >= 0 && !mine)
+			{
+				std::string mineText = "you: " + MarkerLabel(aFrame, aFrame.SelfIndex) + " " +
+					StatusLabel(turn.Rows[aFrame.SelfIndex]);
+				float width = smallFont.Measure(mineText.c_str()).x;
+				DrawText(smallFont, ImVec2(max.x - pad - width, secondY), kYellow, mineText.c_str());
+			}
+			if (upIndex >= 0) { NoteRow(aFrame, upIndex); }
+			ImGui::SetCursorPos(ImVec2(cardPos.x, cardPos.y + cardHeight + ImGui::GetStyle().ItemSpacing.y));
+
+			// The queue.
+			ImGui::TextColored(kGrey, "queue");
+			ImVec2 queuePos = ImGui::GetCursorPos();
+			for (size_t position = 0; position < queue.size(); position++)
+			{
+				int i = queue[position];
+				int column = static_cast<int>(position) % columns;
+				int row = static_cast<int>(position) / columns;
+				ImVec2 cellPos(queuePos.x + column * cellWidth, queuePos.y + row * (line + 2));
+				ImGui::SetCursorPos(cellPos);
+				ImGui::PushID(i);
+				RowInteraction(aFrame, i, ImVec2(cellWidth, line));
+				ImVec2 cellMin = ImGui::GetCursorScreenPos();
+				// The recharge line starts after the position number, so it doesn't read as an underline.
+				float barLeft = cellMin.x + queueMarkerWidth + aFrame.Space;
+				CooldownFill(turn.Rows[i], ImVec2(barLeft, cellMin.y + line - 2),
+					ImVec2(cellMin.x + cellWidth - aFrame.Space * 2, cellMin.y + line), 0.0f);
+				HighlightRow(aFrame, i, cellMin, ImVec2(cellMin.x + cellWidth - 4, cellMin.y + line), 2.0f);
+
+				float cellX = cellPos.x - queuePos.x;
+				ImGui::TextColored(MarkerColor(aFrame, i), "%s", (MarkerLabel(aFrame, i) + ".").c_str());
+				ImGui::SameLine(cellX + queueMarkerWidth + aFrame.Space);
+				ProfessionIcon(Row(aFrame, i).Account, Member(aFrame, i), !IsRelevant(turn.Rows[i].Status));
+				ImGui::SameLine(cellX + queueMarkerWidth + aFrame.Space + line + aFrame.Space);
+				PlayerNameText(Row(aFrame, i).Account, aFrame.Names[i], NameColor(aFrame, i), Member(aFrame, i));
+				std::string status = StatusLabel(turn.Rows[i]);
+				if (!status.empty())
+				{
+					ImGui::SameLine(cellX + queueStatusX);
+					ImGui::TextColored(StatusColor(turn.Rows[i]), "%s", status.c_str());
+				}
+				NoteRow(aFrame, i);
+				ImGui::PopID();
+			}
+			int lines = queue.empty() ? 0 : (static_cast<int>(queue.size()) + columns - 1) / columns;
+			ImGui::SetCursorPos(ImVec2(queuePos.x, queuePos.y + lines * (line + 2)));
+			return cardWidth;
+		}
+
+		// ------------------------------------------------------------------ layout 5: horizontal strip
+		//
+		// The order left to right in one line of cells, for a thin bar along the top or bottom of the screen.
+		// There is no banner: whoever is up is the green cell, and it says so when it is us.
+		float LayoutStrip(Frame& aFrame)
+		{
+			LastFrame.Layout = "strip";
+			const Rezz::TurnView& turn = aFrame.View->Turn;
+			ImDrawList* draw = ImGui::GetWindowDrawList();
+			FontRef nameFont = PickFont(1.15f);
+
+			float line = aFrame.Line;
+			float pad = std::round(line * 0.4f);
+			float iconSize = std::round(line * 1.3f);
+			float cellHeight = std::max(std::round(line * 2.3f), iconSize + pad * 2);
+
+			float nameWidth = 0.0f;
+			for (const std::string& name : aFrame.Names) { nameWidth = std::max(nameWidth, nameFont.Measure(name.c_str()).x); }
+			float statusWidth = 0.0f;
+			for (const char* text : { "ready?", "casting", "120s", "DOWN", "DEAD", "away", "YOUR TURN" })
+			{
+				statusWidth = std::max(statusWidth, ImGui::CalcTextSize(text).x);
+			}
+			float markerWidth = ImGui::CalcTextSize("99").x + aFrame.Space;
+			float cellWidth = pad + iconSize + pad + std::max(nameWidth, markerWidth + statusWidth) + pad;
+
+			// The one state the cells can't show on their own.
+			if (turn.UpIndex < 0)
+			{
+				LastFrame.Banner = "Nobody ready";
+				ImGui::TextColored(kRed, "Nobody ready");
+				if (turn.NextReadyIndex >= 0)
+				{
+					std::string wait = SecondsText(turn.Rows[turn.NextReadyIndex].ReadyInMs);
+					LastFrame.Banner += " - " + aFrame.Names[turn.NextReadyIndex] + " in " + wait;
+					ImGui::SameLine();
+					ImGui::TextColored(kGrey, "- %s in %s", aFrame.Names[turn.NextReadyIndex].c_str(), wait.c_str());
+				}
+			}
+			else
+			{
+				bool mine = aFrame.SelfIndex >= 0 && IsUp(aFrame, aFrame.SelfIndex);
+				LastFrame.Banner = mine ? "YOUR TURN" : "Up: " + aFrame.Names[turn.UpIndex];
+			}
+
+			std::vector<int> visible = VisibleRows(aFrame);
+			// With a width set by hand the strip wraps into further lines instead of running off the screen.
+			int perLine = static_cast<int>(visible.size());
+			if (Settings::Current.OverlayWidth > 0.0f)
+			{
+				perLine = std::max(1, static_cast<int>(Settings::Current.OverlayWidth / cellWidth));
+			}
+			ImVec2 stripPos = ImGui::GetCursorPos();
+			for (size_t position = 0; position < visible.size(); position++)
+			{
+				int i = visible[position];
+				int cellColumn = static_cast<int>(position) % perLine;
+				int cellLine = static_cast<int>(position) / perLine;
+				const Rezz::OrderRow& row = turn.Rows[i];
+				const Rezz::RosterMember* member = Member(aFrame, i);
+				ImGui::SetCursorPos(ImVec2(stripPos.x + cellColumn * cellWidth, stripPos.y + cellLine * (cellHeight + 2)));
+				ImGui::PushID(i);
+				RowInteraction(aFrame, i, ImVec2(cellWidth, cellHeight));
+
+				ImVec2 min = ImGui::GetCursorScreenPos();
+				ImVec2 max(min.x + cellWidth - 2, min.y + cellHeight);
+				draw->AddRectFilled(min, max, IM_COL32(38, 42, 46, 190), 3.0f);
+				CooldownFill(row, min, max, 3.0f);
+				HighlightRow(aFrame, i, min, max, 3.0f);
+				draw->AddRect(min, max, IsUp(aFrame, i) ? UpEdge(i == aFrame.SelfIndex) : IM_COL32(70, 76, 82, 200),
+					3.0f, ImDrawCornerFlags_All, IsUp(aFrame, i) ? 2.0f : 1.0f);
+
+				float x = min.x + pad;
+				if (void* icon = Icons::Get(member ? member->Profession : 0, member ? member->Elite : 0))
+				{
+					draw->AddImage(icon, ImVec2(x, min.y + (cellHeight - iconSize) * 0.5f),
+						ImVec2(x + iconSize, min.y + (cellHeight + iconSize) * 0.5f), ImVec2(0, 0), ImVec2(1, 1),
+						ImGui::GetColorU32(IconTint(member ? member->Profession : 0, !IsRelevant(row.Status))));
+				}
+				x += iconSize + pad;
+				DrawText(nameFont, ImVec2(x, min.y + pad * 0.5f), NameColor(aFrame, i), aFrame.Names[i].c_str());
+
+				// Second line of the cell: place in the order, then the state (or "YOUR TURN" on our own cell).
+				FontRef small{ ImGui::GetFont(), ImGui::GetFontSize() };
+				float lowerY = min.y + cellHeight - line - pad * 0.5f;
+				std::string marker = MarkerLabel(aFrame, i);
+				if (OutOfRange(aFrame, i)) { marker += "?"; }
+				DrawText(small, ImVec2(x, lowerY), MarkerColor(aFrame, i), marker.c_str());
+				bool shout = i == aFrame.SelfIndex && IsUp(aFrame, i);
+				std::string status = shout ? "YOUR TURN" : StatusLabel(row);
+				if (!status.empty())
+				{
+					DrawText(small, ImVec2(x + markerWidth, lowerY), shout ? kGreen : StatusColor(row), status.c_str());
+				}
+				NoteRow(aFrame, i);
+				ImGui::PopID();
+			}
+			int lines = (static_cast<int>(visible.size()) + perLine - 1) / perLine;
+			ImGui::SetCursorPos(ImVec2(stripPos.x, stripPos.y + lines * (cellHeight + 2)));
+			return cellWidth * std::min(perLine, static_cast<int>(visible.size()));
+		}
+
 		// The overlay keeps one size while the order stays the same: every column is as wide as its widest
 		// possible value, and the banner line is always reserved.
 		void RenderOverlay(const Rezz::SessionView& aView, const RosterIndex& aRoster, const Context& aContext)
 		{
 			Settings::Values& s = Settings::Current;
+			LastFrame = FrameInfo{};
 			if (!s.OverlayVisible || !aContext.IsGameplay || aContext.IsMapOpen) { return; }
 			if (s.OverlayOnlyWvw && !aContext.InWvw) { return; }
 
-
 			ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoFocusOnAppearing |
-				ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoSavedSettings;
-			if (s.OverlayScrollBar) { flags |= ImGuiWindowFlags_NoResize; }
-			else { flags |= ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar; }
+				ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoSavedSettings |
+				ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar;
 			// Holding Ctrl+Shift makes the overlay editable (and movable) even while it is locked.
 			bool editMode = ImGui::GetIO().KeyCtrl && ImGui::GetIO().KeyShift;
 			// A menu stays usable after the keys are released; it closes by clicking elsewhere.
 			bool interactive = editMode || !s.OverlayLocked || s_MenuOpen;
-			bool menuOpen = false;
 			if (!s.OverlayTitleBar) { flags |= ImGuiWindowFlags_NoTitleBar; }
 			if (!s.OverlayBackground) { flags |= ImGuiWindowFlags_NoBackground; }
 			if (s.OverlayLocked && !interactive) { flags |= ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoInputs; }
+			// Dragging the corner sizes the window; it must not drag the window along with it.
+			if (s_GripHot) { flags |= ImGuiWindowFlags_NoMove; }
 
 			ArcStyle::Push();
 			ImGui::SetNextWindowPos(ImVec2(s.OverlayX, s.OverlayY), ImGuiCond_Appearing);
-			if (s.OverlayScrollBar)
+			if (s.OverlayWidth > 0)
 			{
-				ImGui::SetNextWindowSize(ImVec2(s.OverlayWidth > 0 ? s.OverlayWidth : 240.0f, s.OverlayHeight), ImGuiCond_Always);
-			}
-			else if (s.OverlayWidth > 0)
-			{
-				// Fixed width, height still fits the rows.
-				ImGui::SetNextWindowSizeConstraints(ImVec2(s.OverlayWidth, 0), ImVec2(s.OverlayWidth, FLT_MAX));
+				// The width the player set is the narrowest the window may be, never the widest: text that
+				// needs more room at a bigger size pushes it wider instead of being cut off.
+				ImGui::SetNextWindowSizeConstraints(ImVec2(s.OverlayWidth, 0), ImVec2(FLT_MAX, FLT_MAX));
 			}
 			ImGui::SetNextWindowBgAlpha(s.OverlayBgAlpha);
 			ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, s.OverlayLocked && !interactive ? 0.0f : 1.0f);
@@ -411,181 +1275,38 @@ namespace OrderUi
 			}
 
 			Fonts::Push(s.OverlayScale);
-			const Rezz::TurnView& turn = aView.Turn;
 			float x0 = ImGui::GetCursorPosX();
-			float spacing = ImGui::GetStyle().ItemSpacing.x * 1.5f;
-			float lineHeight = ImGui::GetTextLineHeight();
-			float contentWidth = ImGui::CalcTextSize("Rezz Order: no order yet.").x;
+			float contentWidth = ImGui::CalcTextSize("Rezz Order: no players yet.").x;
+
+			Frame frame;
+			frame.View = &aView;
+			frame.Roster = &aRoster;
+			frame.Interactive = interactive;
+			frame.EditMode = editMode;
+			frame.Line = ImGui::GetTextLineHeight();
+			frame.Space = ImGui::GetStyle().ItemSpacing.x * 1.5f;
 
 			if (aView.Order.empty())
 			{
+				LastFrame.Layout = "empty";
 				ImGui::TextColored(kGrey, "Rezz Order: no players yet.");
 				ImGui::TextColored(kGrey, s.OverlayLocked ? "Ctrl+Shift + right-click to add players"
 					: "Right-click to add players");
 			}
 			else
 			{
-				std::vector<std::string> names;
-				float nameWidth = 0.0f;
-				int selfIndex = -1;
-				for (int i = 0; i < static_cast<int>(turn.Rows.size()); i++)
+				for (int i = 0; i < static_cast<int>(aView.Turn.Rows.size()); i++)
 				{
-					const Rezz::OrderRow& row = turn.Rows[i];
-					names.push_back(ShortName(PlayerName(row.Account, Find(aRoster, row.Account))));
-					nameWidth = std::max(nameWidth, ImGui::CalcTextSize(names.back().c_str()).x);
-					if (row.Account == aView.SelfAccount) { selfIndex = i; }
+					const Rezz::OrderRow& row = aView.Turn.Rows[i];
+					frame.Names.push_back(ShortName(PlayerName(row.Account, Find(aRoster, row.Account))));
+					if (row.Account == aView.SelfAccount) { frame.SelfIndex = i; }
 				}
-				float markerWidth = std::max(ImGui::CalcTextSize("UP").x, ImGui::CalcTextSize("99").x);
-				markerWidth = std::max(markerWidth, ImGui::CalcTextSize("BK").x);
-				float statusWidth = 0.0f;
-				for (const char* text : { "ready?", "casting", "120s", "DOWN", "DEAD", "away" })
+				switch (s.Layout)
 				{
-					statusWidth = std::max(statusWidth, ImGui::CalcTextSize(text).x);
-				}
-				float iconX = x0 + markerWidth + spacing;
-				float nameX = iconX + lineHeight + spacing;
-				float statusX = nameX + nameWidth + spacing;
-				float rowWidth = statusX + statusWidth - x0;
-				std::string longestName;
-				for (const std::string& name : names) { if (name.size() > longestName.size()) { longestName = name; } }
-				float nobodyWidth = ImGui::CalcTextSize(("Nobody ready - " + longestName + " in 120s").c_str()).x;
-				contentWidth = std::max({ contentWidth, rowWidth, nobodyWidth, ImGui::CalcTextSize("YOUR TURN").x * 1.5f });
-
-				// Banner line, always the height of the big font.
-				float bannerHeight = std::round(lineHeight * 1.5f);
-				ImVec2 bannerPos = ImGui::GetCursorPos();
-				bool bigBanner = selfIndex >= 0 && (selfIndex == turn.UpIndex || selfIndex == aView.BackupIndex);
-				if (bigBanner)
-				{
-					Fonts::Pop();
-					Fonts::Push(s.OverlayScale, true);
-					if (selfIndex == turn.UpIndex) { ImGui::TextColored(kGreen, "YOUR TURN"); }
-					else { ImGui::TextColored(kOrange, "BACKUP"); }
-					Fonts::Pop();
-					Fonts::Push(s.OverlayScale);
-				}
-				else
-				{
-					ImGui::SetCursorPosY(bannerPos.y + (bannerHeight - lineHeight) * 0.5f);
-					if (turn.UpIndex >= 0)
-					{
-						ImGui::TextColored(kGrey, "Up:");
-						ImGui::SameLine();
-						ImGui::TextUnformatted(names[turn.UpIndex].c_str());
-					}
-					else
-					{
-						ImGui::TextColored(kRed, "Nobody ready");
-						if (turn.NextReadyIndex >= 0)
-						{
-							ImGui::SameLine();
-							ImGui::TextColored(kGrey, "- %s in %s", names[turn.NextReadyIndex].c_str(),
-								SecondsText(turn.Rows[turn.NextReadyIndex].ReadyInMs).c_str());
-						}
-					}
-				}
-				ImGui::SetCursorPos(ImVec2(bannerPos.x, bannerPos.y + bannerHeight + ImGui::GetStyle().ItemSpacing.y));
-
-				// "max displayed" shows a window of the order starting at whoever is up, so the rows that
-				// matter are always the visible ones. Numbers keep the player's real place in the order.
-				int rowCount = static_cast<int>(turn.Rows.size());
-				int shown = s.OverlayMaxRows > 0 ? std::min(rowCount, s.OverlayMaxRows) : rowCount;
-				int first = s.OverlayMaxRows > 0 && turn.UpIndex >= 0 ? turn.UpIndex : 0;
-				for (int offset = 0; offset < shown; offset++)
-				{
-					int i = (first + offset) % rowCount;
-					const Rezz::OrderRow& row = turn.Rows[i];
-					const Rezz::RosterMember* member = Find(aRoster, row.Account);
-					bool isUp = i == turn.UpIndex;
-					bool isBackup = i == aView.BackupIndex;
-					ImGui::PushID(i);
-					ImVec2 rowPos = ImGui::GetCursorPos();
-
-					if (interactive)
-					{
-						// The whole row is a drag handle; the texts are drawn on top of it afterwards.
-						ImGui::InvisibleButton("row", ImVec2(contentWidth, lineHeight));
-						if (editMode && ImGui::BeginDragDropSource())
-						{
-							ImGui::SetDragDropPayload("REZZ_ORDER_ROW", &i, sizeof(i));
-							ImGui::TextUnformatted(names[i].c_str());
-							ImGui::EndDragDropSource();
-						}
-						if (ImGui::BeginDragDropTarget())
-						{
-							if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("REZZ_ORDER_ROW"))
-							{
-								MoveInOrder(aView.Order, *static_cast<const int*>(payload->Data), i);
-							}
-							ImGui::EndDragDropTarget();
-						}
-						if (editMode && ImGui::IsItemHovered())
-						{
-							ImGui::GetWindowDrawList()->AddRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), IM_COL32(255, 255, 255, 90));
-						}
-						if (ImGui::BeginPopupContextItem("row_menu"))
-						{
-							menuOpen = true;
-							ImGui::TextColored(kGrey, "%s", names[i].c_str());
-							ImGui::Separator();
-							if (ImGui::MenuItem("Remove player")) { RemoveFromOrder(aView.Order, i); }
-							NicknameMenu(row.Account);
-							AddMeItem(aView);
-							if (ImGui::MenuItem("Move up", nullptr, false, i > 0)) { MoveInOrder(aView.Order, i, i - 1); }
-							if (ImGui::MenuItem("Move down", nullptr, false, i + 1 < static_cast<int>(turn.Rows.size()))) { MoveInOrder(aView.Order, i, i + 1); }
-							AddPlayerMenu(aView);
-							if (ImGui::MenuItem("Open order editor")) { ShowEditor = true; }
-							ImGui::Separator();
-							StyleMenu();
-							ImGui::EndPopup();
-						}
-						ImGui::SetCursorPos(rowPos);
-					}
-
-					// Up and backup differ in fill, in the thickness of the edge bar and in their label, so
-					// they can be told apart without seeing colour.
-					if (isUp || isBackup)
-					{
-						ImVec2 min = ImGui::GetCursorScreenPos();
-						ImVec2 max(min.x + contentWidth, min.y + lineHeight);
-						ImU32 color = isUp ? IM_COL32(60, 170, 60, 110) : IM_COL32(200, 130, 30, 80);
-						ImDrawList* draw = ImGui::GetWindowDrawList();
-						draw->AddRectFilled(ImVec2(min.x - 3, min.y - 1), ImVec2(max.x + 3, max.y + 1), color, 2.0f);
-						float edge = isUp ? 3.0f : 1.0f;
-						ImU32 edgeColor = isUp ? IM_COL32(120, 230, 120, 230) : IM_COL32(240, 170, 60, 200);
-						draw->AddRectFilled(ImVec2(min.x - 5, min.y - 1), ImVec2(min.x - 5 + edge, max.y + 1), edgeColor);
-					}
-
-					if (isUp) { ImGui::TextColored(kGreen, "UP"); }
-					else if (isBackup) { ImGui::TextColored(kOrange, "BK"); }
-					else { ImGui::TextColored(kGrey, "%d", i + 1); }
-
-					// Silent through a whole squad fight: they are out of the range arcdps reports on, so
-					// their state may be out of date.
-					bool outOfRange = aView.SquadInCombat && member &&
-						aView.NowMs > member->LastEventMs + Rezz::Session::kOutOfRangeMs;
-					if (outOfRange)
-					{
-						ImGui::SameLine(0, 2);
-						ImGui::TextColored(kGrey, "?");
-						if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenOverlapped))
-						{
-							ImGui::SetTooltip("no events from this player during the fight: out of range");
-						}
-					}
-
-					ImGui::SameLine(iconX);
-					ProfessionIcon(row.Account, member);
-
-					ImGui::SameLine(nameX);
-					const ImVec4& color = row.Account == aView.SelfAccount ? kYellow
-						: (IsAvailable(row.Status) ? ImGui::GetStyleColorVec4(ImGuiCol_Text) : kGrey);
-					PlayerNameText(row.Account, names[i], color, member);
-
-					ImGui::SameLine(statusX);
-					StatusText(row);
-					if (interactive) { ImGui::SetCursorPos(ImVec2(rowPos.x, rowPos.y + lineHeight + ImGui::GetStyle().ItemSpacing.y)); }
-					ImGui::PopID();
+					case Settings::OverlayLayout::Bars:  contentWidth = std::max(contentWidth, LayoutBars(frame)); break;
+					case Settings::OverlayLayout::Focus: contentWidth = std::max(contentWidth, LayoutFocus(frame)); break;
+					case Settings::OverlayLayout::Strip: contentWidth = std::max(contentWidth, LayoutStrip(frame)); break;
+					default:                             contentWidth = std::max(contentWidth, LayoutCompact(frame)); break;
 				}
 			}
 
@@ -605,12 +1326,53 @@ namespace OrderUi
 				ImGui::TextColored(kGrey, "drag to move, Ctrl+Shift to edit, right-click for options");
 			}
 			ImGui::PopTextWrapPos();
-			// Keeps the width constant while the statuses change; not needed when the width is set by hand.
-			if (s.OverlayWidth <= 0 && !s.OverlayScrollBar) { ImGui::Dummy(ImVec2(contentWidth, 0.0f)); }
+			// Keeps the width constant while the statuses change.
+			ImGui::Dummy(ImVec2(contentWidth, 0.0f));
 			Fonts::Pop();
 
-			if (interactive) { menuOpen = OverlayContextMenu(aView) || menuOpen; }
-			s_MenuOpen = menuOpen;
+			// A grip in the corner, like any window has, except that it scales the whole thing: with the width
+			// left to fit the rows there is nothing else a corner could mean here. It is drawn and hit-tested
+			// by hand: a real widget down there would count as content and push the corner away from itself.
+			if (interactive)
+			{
+				float grip = std::max(10.0f, ImGui::GetTextLineHeight() * 0.7f);
+				ImVec2 corner(ImGui::GetWindowPos().x + ImGui::GetWindowSize().x,
+					ImGui::GetWindowPos().y + ImGui::GetWindowSize().y);
+				ImVec2 gripMin(corner.x - grip, corner.y - grip);
+				bool hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
+					ImGui::IsMouseHoveringRect(gripMin, corner, false);
+				if (hovered && ImGui::IsMouseClicked(0)) { s_GripHeld = true; }
+				if (!ImGui::IsMouseDown(0)) { s_GripHeld = false; }
+				if (s_GripHeld)
+				{
+					// Sideways drag reads as "bigger"; the height follows the rows by itself.
+					float step = ImGui::GetIO().MouseDelta.x / std::max(contentWidth, 1.0f);
+					float scale = s.OverlayScale * (1.0f + step);
+					s.OverlayScale = scale < 0.7f ? 0.7f : (scale > 2.5f ? 2.5f : scale);
+					Settings::MarkDirty();
+				}
+				// Always there to be found while the window is unlocked, the way any resizable window shows
+				// its corner; brighter once the mouse is on it.
+				if (s_GripHeld || hovered) { ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNWSE); }
+				ImU32 color = s_GripHeld ? IM_COL32(255, 230, 120, 235)
+					: hovered ? IM_COL32(220, 220, 220, 180) : IM_COL32(190, 190, 190, 80);
+				ImDrawList* draw = ImGui::GetWindowDrawList();
+				for (float offset = 3.0f; offset < grip; offset += 3.0f)
+				{
+					draw->AddLine(ImVec2(corner.x - offset, corner.y - 2), ImVec2(corner.x - 2, corner.y - offset), color, 1.0f);
+				}
+				s_GripHot = s_GripHeld || hovered;
+			}
+			else { s_GripHot = false; }
+
+			if (interactive) { frame.MenuOpen = OverlayContextMenu(aView) || frame.MenuOpen; }
+			s_MenuOpen = frame.MenuOpen;
+
+			LastFrame.Drawn = true;
+			LastFrame.X = ImGui::GetWindowPos().x;
+			LastFrame.Y = ImGui::GetWindowPos().y;
+			LastFrame.Width = ImGui::GetWindowSize().x;
+			LastFrame.Height = ImGui::GetWindowSize().y;
 			ImGui::End();
 			ArcStyle::Pop();
 		}
@@ -758,6 +1520,45 @@ namespace OrderUi
 			ImGui::EndChild();
 			if (changed) { ApplyOrder(order); }
 
+			if (ImGui::Button("Save as...")) { ImGui::OpenPopup("save_preset"); }
+			if (ImGui::BeginPopup("save_preset"))
+			{
+				ImGui::TextColored(kGrey, "Keep this order under a name:");
+				SavePresetField(aView, "editor");
+				ImGui::EndPopup();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Load...")) { ImGui::OpenPopup("load_preset"); }
+			if (ImGui::BeginPopup("load_preset"))
+			{
+				Settings::Values& s = Settings::Current;
+				if (s.Presets.empty()) { ImGui::TextColored(kGrey, "no saved orders yet"); }
+				for (auto it = s.Presets.begin(); it != s.Presets.end(); )
+				{
+					ImGui::PushID(it->first.c_str());
+					if (ImGui::Button("Load")) { ApplyOrder(it->second); ImGui::CloseCurrentPopup(); }
+					ImGui::SameLine();
+					if (ImGui::SmallButton("x"))
+					{
+						it = s.Presets.erase(it);
+						Settings::MarkDirty();
+						ImGui::PopID();
+						continue;
+					}
+					ImGui::SameLine();
+					ImGui::Text("%s (%zu)", it->first.c_str(), it->second.size());
+					ImGui::PopID();
+					++it;
+				}
+				ImGui::EndPopup();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Copy for squad chat")) { CopyOrder(aView); }
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip("%s", Rezz::Share::Encode(aView.Order, aView.Roster).c_str());
+			}
+			ImGui::SameLine();
 			if (ImGui::Button("Clear order")) { ImGui::OpenPopup("clear_order"); }
 			if (ImGui::BeginPopup("clear_order"))
 			{
@@ -769,8 +1570,146 @@ namespace OrderUi
 			}
 		}
 
+		// Somebody who isn't the commander shared an order. It is never applied behind the player's back, so
+		// this asks, in its own small window that takes clicks even while the overlay is locked.
+		void RenderShare(const Rezz::SessionView& aView, const RosterIndex& aRoster, const Context& aContext)
+		{
+			LastShareFrame = FrameInfo{};
+			if (!aView.HasShare || !aContext.IsGameplay) { return; }
+
+			ArcStyle::Push();
+			ImGui::SetNextWindowSize(ImVec2(0, 0), ImGuiCond_Always);
+			// Near the middle of the screen: it is a question, and it must not appear off-screen because the
+			// turn window happens to sit in a corner.
+			ImVec2 screen = ImGui::GetIO().DisplaySize;
+			ImGui::SetNextWindowPos(ImVec2(screen.x * 0.5f, screen.y * 0.35f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+			if (ImGui::Begin("Revive order shared###share", nullptr, ImGuiWindowFlags_AlwaysAutoResize |
+				ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings))
+			{
+				const Rezz::RosterMember* sender = Find(aRoster, aView.Share.From);
+				ImGui::TextColored(kYellow, "%s", PlayerName(aView.Share.From, sender).c_str());
+				ImGui::SameLine();
+				ImGui::TextUnformatted("shared a revive order:");
+
+				for (size_t i = 0; i < aView.Share.Accounts.size(); i++)
+				{
+					const std::string& account = aView.Share.Accounts[i];
+					const Rezz::RosterMember* member = Find(aRoster, account);
+					bool isSelf = account == aView.SelfAccount;
+					ImGui::TextColored(isSelf ? kYellow : kGrey, "%zu.", i + 1);
+					ImGui::SameLine();
+					ProfessionIcon(account, member);
+					ImGui::SameLine();
+					PlayerNameText(account, PlayerName(account, member),
+						isSelf ? kYellow : ImGui::GetStyleColorVec4(ImGuiCol_Text), member);
+				}
+
+				// Where this would put us is the part of somebody else's order that is ours to care about.
+				int now = aView.Share.OurPlaceNow;
+				int then = aView.Share.OurPlaceThen;
+				if (then != now)
+				{
+					if (then == 0) { ImGui::TextColored(kOrange, "you would not be in the order any more"); }
+					else if (now == 0) { ImGui::TextColored(kYellow, "you would be %d.", then); }
+					else { ImGui::TextColored(kYellow, "you would be %d. instead of %d.", then, now); }
+				}
+				else if (then != 0)
+				{
+					ImGui::TextColored(kGrey, "your place stays %d.", then);
+				}
+				if (!aView.Share.Unknown.empty())
+				{
+					ImGui::TextColored(kOrange, "%zu name(s) not in the squad were left out", aView.Share.Unknown.size());
+				}
+
+				if (ImGui::Button("Use this order")) { Live::AcceptShare(); }
+				ImGui::SameLine();
+				if (ImGui::Button("Ignore")) { Live::DismissShare(); }
+				ImGui::SameLine();
+				ImGui::TextColored(kGrey, "(your own order stays until you accept)");
+
+				LastShareFrame.Drawn = true;
+				LastShareFrame.Layout = "share";
+				LastShareFrame.X = ImGui::GetWindowPos().x;
+				LastShareFrame.Y = ImGui::GetWindowPos().y;
+				LastShareFrame.Width = ImGui::GetWindowSize().x;
+				LastShareFrame.Height = ImGui::GetWindowSize().y;
+			}
+			ImGui::End();
+			ArcStyle::Pop();
+		}
+
+		// Somebody typed "!rezz?" in squad chat. Addons cannot answer by themselves, so this asks whether to
+		// put the order on the clipboard; pasting it is still the player's keystroke.
+		void RenderRequest(const Rezz::SessionView& aView, const RosterIndex& aRoster, const Context& aContext)
+		{
+			LastRequestFrame = FrameInfo{};
+			if (!aView.HasRequest || !aContext.IsGameplay) { return; }
+
+			ArcStyle::Push();
+			ImGui::SetNextWindowSize(ImVec2(0, 0), ImGuiCond_Always);
+			ImVec2 screen = ImGui::GetIO().DisplaySize;
+			ImGui::SetNextWindowPos(ImVec2(screen.x * 0.5f, screen.y * 0.35f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+			if (ImGui::Begin("Revive order asked for###request", nullptr, ImGuiWindowFlags_AlwaysAutoResize |
+				ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings))
+			{
+				const Rezz::RosterMember* asker = Find(aRoster, aView.RequestFrom);
+				std::string askerName = PlayerName(aView.RequestFrom, asker);
+				ImGui::TextColored(kYellow, "%s", askerName.c_str());
+				ImGui::SameLine();
+				ImGui::TextUnformatted("asked for the revive order.");
+
+				// Somebody asking for the order has usually just joined, so the answer is normally to put
+				// them in it first. The line below is what the left-hand button copies.
+				bool inOrder = std::find(aView.Order.begin(), aView.Order.end(), aView.RequestFrom) != aView.Order.end();
+				std::vector<std::string> withThem = aView.Order;
+				if (!inOrder) { withThem.push_back(aView.RequestFrom); }
+				if (!inOrder)
+				{
+					ProfessionIcon(aView.RequestFrom, asker);
+					ImGui::SameLine();
+					ImGui::TextColored(kOrange, "%s is not in the order.", askerName.c_str());
+					if (asker && asker->Profession != 0 && !Rezz::IsReviveProfession(asker->Profession))
+					{
+						ImGui::SameLine();
+						ImGui::TextColored(kRed, "(%s has no revive skill)", Rezz::ProfessionShortName(asker->Profession));
+					}
+				}
+				ImGui::TextColored(kGrey, "%s", Rezz::Share::Encode(withThem, aView.Roster).c_str());
+
+				if (inOrder)
+				{
+					if (ImGui::Button("Copy it for squad chat")) { CopyOrder(aView); }
+				}
+				else
+				{
+					if (ImGui::Button(("Add " + askerName + " and copy").c_str()))
+					{
+						ApplyOrder(withThem);
+						CopyOrderLine(withThem, aView.Roster);
+					}
+					ImGui::SameLine();
+					if (ImGui::Button("Copy without adding")) { CopyOrder(aView); }
+				}
+				ImGui::SameLine();
+				if (ImGui::Button("Not now")) { Live::ClearRequest(); }
+				ImGui::SameLine();
+				ImGui::TextColored(kGrey, "(then paste it in squad chat)");
+
+				LastRequestFrame.Drawn = true;
+				LastRequestFrame.Layout = "request";
+				LastRequestFrame.X = ImGui::GetWindowPos().x;
+				LastRequestFrame.Y = ImGui::GetWindowPos().y;
+				LastRequestFrame.Width = ImGui::GetWindowSize().x;
+				LastRequestFrame.Height = ImGui::GetWindowSize().y;
+			}
+			ImGui::End();
+			ArcStyle::Pop();
+		}
+
 		void RenderEditor(const Rezz::SessionView& aView, const RosterIndex& aRoster, const Context& aContext)
 		{
+			LastEditorFrame = FrameInfo{};
 			if (!ShowEditor || !aContext.IsGameplay) { return; }
 
 			ArcStyle::Push();
@@ -797,6 +1736,12 @@ namespace OrderUi
 					OrderColumn(aView, aRoster);
 					ImGui::EndTable();
 				}
+				LastEditorFrame.Drawn = true;
+				LastEditorFrame.Layout = "editor";
+				LastEditorFrame.X = ImGui::GetWindowPos().x;
+				LastEditorFrame.Y = ImGui::GetWindowPos().y;
+				LastEditorFrame.Width = ImGui::GetWindowSize().x;
+				LastEditorFrame.Height = ImGui::GetWindowSize().y;
 			}
 			ImGui::End();
 			ArcStyle::Pop();
@@ -806,6 +1751,8 @@ namespace OrderUi
 	void Init()
 	{
 		Live::SetOrder(Settings::Current.Order);
+		Live::SetShareRules(Settings::Current.ShareFromLeaders, Settings::Current.ShareFromAnyone);
+		Live::SetAnswerRule(Settings::Current.AnswerRequests);
 	}
 
 	void AddNotice(const std::string& aText, unsigned aNowMs)
@@ -829,20 +1776,80 @@ namespace OrderUi
 			Settings::MarkDirty();
 		}
 
+		s_LastNowMs = aContext.NowMs;
 		ArcStyle::Update(aContext.NowMs);
 		Fonts::Update(Settings::Current.OverlayScale, aContext.NowMs);
 		TextInputActive = false;
-		Rezz::SessionView view = Live::GetView();
-		if (view.Order != Settings::Current.Order)
+		Rezz::SessionView live = Live::GetView();
+		// Demo mode shows a squad that isn't there; the real order must not be touched while it runs.
+		Rezz::SessionView view = Rezz::Demo::Running() ? Rezz::Demo::View(aContext.NowMs) : live;
+		if (!Rezz::Demo::Running() && view.Order != Settings::Current.Order)
 		{
 			Settings::Current.Order = view.Order;
 			Settings::MarkDirty();
 		}
+		if (CopyOrderRequested.exchange(false)) { CopyOrder(view); }
 		CountCharacterNames(view);
+
+		// The three signals for "it is on you now". The turn window shows it too, but only if you are
+		// looking at it.
+		Notify::Standing standing = Notify::Standing::None;
+		if (!view.SelfAccount.empty())
+		{
+			const Rezz::TurnView& turn = view.Turn;
+			if (turn.UpIndex >= 0 && turn.Rows[turn.UpIndex].Account == view.SelfAccount) { standing = Notify::Standing::Up; }
+			else if (view.BackupIndex >= 0 && turn.Rows[view.BackupIndex].Account == view.SelfAccount) { standing = Notify::Standing::Backup; }
+		}
+		// The demo squad is there to set these up, so it raises them wherever the player is standing.
+		bool signalsHere = aContext.InWvw || Rezz::Demo::Running();
+		std::string banner = Notify::OnStanding(standing, aContext.NowMs, signalsHere, aContext.IsGameplay);
+		if (!banner.empty() && StandingBanner != nullptr) { StandingBanner(banner); }
+		Notify::Render(aContext.NowMs, aContext.IsGameplay && !aContext.IsMapOpen);
+
 		RosterIndex roster = IndexRoster(view);
 		RenderOverlay(view, roster, aContext);
+		RenderShare(view, roster, aContext);
+		RenderRequest(view, roster, aContext);
 		RenderEditor(view, roster, aContext);
 		Settings::Flush(aContext.NowMs);
+	}
+
+	namespace
+	{
+		// One banner switch, with the message it would show on hover.
+		void BannerToggle(const char* aLabel, bool* aValue, const char* aExample)
+		{
+			if (ImGui::Checkbox(aLabel, aValue)) { Settings::MarkDirty(); }
+			if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", aExample); }
+		}
+
+		// Banner, sound and flash for one standing, on one line each.
+		void StandingSignals(const char* aWhat, bool* aBanner, int* aSound, bool* aFlash, float aColor[3])
+		{
+			ImGui::PushID(aWhat);
+			ImGui::TextColored(kYellow, "%s", aWhat);
+			ImGui::SameLine(110);
+			if (ImGui::Checkbox("banner", aBanner)) { Settings::MarkDirty(); }
+
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(130);
+			const char* names[static_cast<int>(Notify::Sound::Count)] = {};
+			for (int i = 0; i < static_cast<int>(Notify::Sound::Count); i++)
+			{
+				names[i] = Notify::SoundName(static_cast<Notify::Sound>(i));
+			}
+			if (ImGui::Combo("##sound", aSound, names, static_cast<int>(Notify::Sound::Count))) { Settings::MarkDirty(); }
+			ImGui::SameLine();
+			// Listening to them all is the only way to pick one.
+			if (ImGui::Button("play")) { Notify::Play(static_cast<Notify::Sound>(*aSound)); }
+
+			ImGui::SameLine();
+			if (ImGui::Checkbox("flash", aFlash)) { Settings::MarkDirty(); }
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(160);
+			if (ImGui::ColorEdit3("##colour", aColor, ImGuiColorEditFlags_NoInputs)) { Settings::MarkDirty(); }
+			ImGui::PopID();
+		}
 	}
 
 	void Options()
@@ -850,14 +1857,29 @@ namespace OrderUi
 		Settings::Values& s = Settings::Current;
 		ImGui::TextUnformatted("Revive order");
 		if (ImGui::Button("Open order editor (Ctrl+Shift+O)")) { ShowEditor = true; }
-		if (ImGui::Checkbox("Show overlay", &s.OverlayVisible)) { Settings::MarkDirty(); }
-		if (ImGui::Checkbox("Lock overlay: can't be moved, clicks pass through (Ctrl+Shift+L)", &s.OverlayLocked)) { Settings::MarkDirty(); }
-		if (ImGui::Checkbox("Only show on WvW maps", &s.OverlayOnlyWvw)) { Settings::MarkDirty(); }
-		if (ImGui::Checkbox("Title bar", &s.OverlayTitleBar)) { Settings::MarkDirty(); }
-		ImGui::SetNextItemWidth(200);
-		if (ImGui::SliderFloat("Overlay background", &s.OverlayBgAlpha, 0.0f, 1.0f, "%.2f")) { Settings::MarkDirty(); }
-		ImGui::SetNextItemWidth(200);
-		if (ImGui::SliderFloat("Overlay size", &s.OverlayScale, 0.7f, 2.5f, "%.1f")) { Settings::MarkDirty(); }
+		ImGui::SameLine();
+		if (Rezz::Demo::Running())
+		{
+			if (ImGui::Button("Stop demo")) { Rezz::Demo::Stop(); }
+			ImGui::SameLine();
+			ImGui::TextColored(kOrange, "demo squad: not real players");
+		}
+		else if (ImGui::Button("Demo squad"))
+		{
+			Rezz::Demo::Start(Live::GetView().SelfAccount, s_LastNowMs);
+		}
+		if (ImGui::IsItemHovered())
+		{
+			ImGui::SetTooltip("A made-up squad fighting on a loop, to place and size the window.");
+		}
+		ImGui::Separator();
+		ImGui::TextUnformatted("Turn window");
+		ImGui::TextColored(kGrey, "The same settings are on the window itself: right-click it > style.");
+		ImGui::TextColored(kGrey, "Drag the corner grip to size it, Ctrl+Shift+L locks it (Ctrl+Shift edits it while locked).");
+		WindowOptions();
+
+		ImGui::Separator();
+		ImGui::TextUnformatted("Look and names");
 		if (ImGui::Checkbox("Match ArcDPS appearance (colours, padding, font size)", &s.MatchArcDps)) { Settings::MarkDirty(); }
 		if (s.MatchArcDps)
 		{
@@ -887,7 +1909,78 @@ namespace OrderUi
 		}
 		if (ImGui::Checkbox("Always use account names", &s.PreferAccount)) { Settings::MarkDirty(); }
 		ImGui::TextColored(kGrey, "Otherwise character names are used, except in Edge of the Mists where players from other worlds show a WvW rank.");
-		if (ImGui::Checkbox("Alert when a player in the order leaves or swaps profession", &s.AlertOnChanges)) { Settings::MarkDirty(); }
+
+		ImGui::Separator();
+		ImGui::TextUnformatted("Notifications");
+		ImGui::TextColored(kGrey, "Every message is shown in the turn window. These pick the ones that also get a");
+		ImGui::TextColored(kGrey, "Nexus banner across the top of the screen.");
+		BannerToggle("a player in the order leaves", &s.BannerOnLeave,
+			"\"3. PlayerXYZ left the squad - you are up now\"");
+		BannerToggle("a player swaps profession", &s.BannerOnSwap,
+			"\"3. PlayerXYZ swapped to Ranger (no revive skill)\"");
+		BannerToggle("somebody shares an order", &s.BannerOnShare,
+			"\"PlayerXYZ shared a revive order (6 players) - you are now 2. (was 4.)\"");
+		BannerToggle("somebody asks for the order", &s.BannerOnAsk,
+			"\"PlayerXYZ asked for the revive order\"");
+
+		ImGui::Spacing();
+		ImGui::TextUnformatted("When the turn reaches you");
+		ImGui::TextColored(kGrey, "Only on WvW maps. The demo squad raises them too, so they can be tried out.");
+		StandingSignals("your turn", &s.UpBanner, &s.UpSound, &s.UpFlash, s.UpFlashColor);
+		StandingSignals("backup", &s.BackupBanner, &s.BackupSound, &s.BackupFlash, s.BackupFlashColor);
+
+		ImGui::SetNextItemWidth(160);
+		if (ImGui::SliderInt("sound volume", &s.SoundVolume, 0, 100, "%d%%")) { Settings::MarkDirty(); }
+		if (s.UpSound == static_cast<int>(Notify::Sound::File) || s.BackupSound == static_cast<int>(Notify::Sound::File))
+		{
+			char path[260] = {};
+			strncpy_s(path, s.SoundFile.c_str(), _TRUNCATE);
+			ImGui::SetNextItemWidth(400);
+			if (ImGui::InputText("WAV file", path, sizeof(path))) { s.SoundFile = path; Settings::MarkDirty(); }
+			TextInputActive = TextInputActive || ImGui::IsItemActive();
+		}
+		ImGui::SetNextItemWidth(160);
+		if (ImGui::SliderFloat("flash strength", &s.FlashStrength, 0.05f, 1.0f, "%.2f")) { Settings::MarkDirty(); }
+		if (ImGui::Button("Show me the flash"))
+		{
+			Notify::OnStanding(Notify::Standing::None, s_LastNowMs, true, true);
+			Notify::OnStanding(Notify::Standing::Up, s_LastNowMs + 1, true, true);
+		}
+		ImGui::SameLine();
+		ImGui::TextColored(kGrey, "(a pulse along the screen edges, like a low-health warning)");
+
+		ImGui::Separator();
+		ImGui::TextUnformatted("Sharing the order in squad chat");
+		ImGui::TextColored(kGrey, "Addons cannot write in chat. \"Copy order for squad chat\" (right-click the turn window)");
+		ImGui::TextColored(kGrey, "puts a line like \"!rezz Gorath > murako\" on the clipboard; paste it in squad chat and");
+		ImGui::TextColored(kGrey, "everyone running this addon reads it. \"!rezz?\" asks the squad for the order.");
+		if (ImGui::Checkbox("Take over an order shared by the commander or a lieutenant", &s.ShareFromLeaders))
+		{
+			Settings::MarkDirty();
+			Live::SetShareRules(s.ShareFromLeaders, s.ShareFromAnyone);
+		}
+		if (ImGui::Checkbox("...by anyone in the squad, without asking", &s.ShareFromAnyone))
+		{
+			Settings::MarkDirty();
+			Live::SetShareRules(s.ShareFromLeaders, s.ShareFromAnyone);
+		}
+		ImGui::TextColored(kGrey, "Anyone else's order waits in a window for you to accept it.");
+		ImGui::TextColored(kGrey, "Ctrl+Shift+K copies the order without opening anything.");
+
+		// Without this, one "!rezz?" would open a window on every screen in the squad at once.
+		static const char* kAnswerNames[] = { "nobody: only a line in the turn window",
+			"me, when the order is mine", "me, always" };
+		int answer = s.AnswerRequests;
+		ImGui::SetNextItemWidth(260);
+		if (ImGui::Combo("Who answers a request for the order", &answer, kAnswerNames, IM_ARRAYSIZE(kAnswerNames)))
+		{
+			s.AnswerRequests = answer;
+			Settings::MarkDirty();
+			Live::SetAnswerRule(answer);
+		}
+		ImGui::TextColored(kGrey, "An order you took over from somebody else is theirs to answer for, so by default");
+		ImGui::TextColored(kGrey, "only the client that built the order is asked. The window closes by itself as soon");
+		ImGui::TextColored(kGrey, "as an order appears in squad chat.");
 		ImGui::TextColored(kGrey, "Hold Ctrl+Shift over the overlay to reorder it directly, even while it is locked.");
 		ImGui::TextColored(kGrey, "Squad events reach addons ~2.6 s late (ArcDPS design): states change a moment after they happen in game.");
 	}
