@@ -1,0 +1,59 @@
+# Builds RezzOrder.dll on a Windows runner and attaches it to a GitHub release, so people can download the
+# addon with one click instead of building it.
+#
+# Push a tag to publish:   git tag v0.2.0 && git push origin v0.2.0
+# Or run it by hand from the Actions tab, which only uploads a build artifact.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write    # needed to create the release
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out, with the ImGui and API submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure
+        # The tools need a GPU-less D3D11 device and a system font, neither of which a runner promises, so
+        # only the addon itself is built here.
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_COMPILER=cl -DREZZ_BUILD_TOOLS=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Keep the DLL as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RezzOrder
+          path: build/RezzOrder.dll
+          if-no-files-found: error
+
+      - name: Attach it to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/RezzOrder.dll
+          generate_release_notes: true
+          body: |
+            Put `RezzOrder.dll` into `<Guild Wars 2>\addons\`, then start the game.
+
+            Needs [Nexus](https://raidcore.gg/Nexus), [ArcDPS](https://www.deltaconnected.com/arcdps/) and
+            the **ArcDPS Integration** addon from the Nexus addon library.
+            [Unofficial Extras](https://github.com/Krappa322/arcdps_unofficial_extras_releases) is optional
+            and adds squad roles and order sharing.

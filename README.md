@@ -4,9 +4,14 @@ A Guild Wars 2 addon for WvW squads with a set revive tool order. It watches eve
 skills and shows whose turn it is, so two people don't burn an Illu and Spirit on the
 same downed player.
 
-![What it does](docs/images/banner.gif)
+<video src="https://cdn.jsdelivr.net/gh/qq1ng/rezzOrder@main/docs/images/banner.mp4"
+       autoplay loop muted playsinline width="640">
+  <img src="docs/images/banner.gif" alt="What it does" width="640">
+</video>
 
 ## Install
+
+**[Download the latest RezzOrder.dll](https://github.com/qq1ng/rezzOrder/releases/latest)**, then:
 
 1. **Nexus.** Get it from [raidcore.gg/Nexus](https://raidcore.gg/Nexus) and install it into your Guild Wars
    2 folder. Nexus is the addon loader everything else sits on.
