@@ -57,6 +57,14 @@ namespace Rezz
 		uint64_t                 TimeMs   = 0;
 	};
 
+	// Somebody revived by Illusion of Life. They go down again when it runs out, unless they rally first.
+	struct IllusionTarget
+	{
+		std::string Account;
+		uint64_t    EndsInMs = 0;
+		bool        OurCast  = false; // we cast it: we get the countdown even with our own revive spent on it
+	};
+
 	struct Notice
 	{
 		NoticeKind  Kind;
@@ -78,6 +86,8 @@ namespace Rezz
 		SharedOrder               Share;
 		bool                      HasRequest = false; // somebody asked us for the order
 		std::string               RequestFrom;        // their account, with the leading ':'
+		std::vector<IllusionTarget> Illusions;        // other players under Illusion of Life, soonest to run out first
+		bool                      SelfCanRevive = false; // our own revive skill is ready and we are on our feet to use it
 	};
 
 	// True for professions that have an instant revive utility: guardian, warrior, ranger, elementalist,
@@ -106,6 +116,11 @@ namespace Rezz
 		static constexpr uint64_t kRequestShowMs = 60 * 1000;
 		// How soon the same person asking again is announced again, rather than only refreshing the window.
 		static constexpr uint64_t kAskAgainMs = 30 * 1000;
+		// How long the squad has to be out of combat before the turn goes back to the top of the order. ArcDPS
+		// ends a squad fight at every lull: in the field logs of 2026-09-15 a quarter of the breaks between its
+		// fights were under five seconds and there was no natural gap to go by. Twenty seconds merged its 114
+		// fights into 49 engagements of about a minute each, which is what a squad would call a fight.
+		static constexpr uint64_t kRotationResetMs = 20 * 1000;
 
 		// Squad channel combat event. aNowMs is the arrival time (timeGetTime), used only for roster timing;
 		// the tracker works in event time.
@@ -175,6 +190,10 @@ namespace Rezz
 		// " - you are up now" when somebody dropping out of the rotation moved the turn to us.
 		std::string StandingChange(int aBefore, int aAfter) const;
 		void OnSelfLeftSquad();
+		bool SelfCanRevive(uint64_t aNowMs) const;
+		// A completed Illusion of Life cast (aIsCast) or an ally getting up, matched against the other kind at the
+		// same instant: stands in for the effect's apply until one has been seen.
+		void MatchIllusion(uint64_t aTimeMs, const std::string& aAccount, bool aIsCast);
 		// Somebody in the order is gone for good (left the squad, or swapped to another character). Takes them
 		// out of the order and the precast list, leaving everyone else's turn alone.
 		void DropFromOrder(const std::string& aAccount);
@@ -191,6 +210,24 @@ namespace Rezz
 		uint64_t                                      m_ResyncAtMs      = 0;
 		bool                                          m_HasRoles        = false; // Unofficial Extras is reporting
 		uint64_t                                      m_CombatSinceMs   = 0; // 0: squad not in combat
+		uint64_t                                      m_OutOfCombatSinceMs = 0; // 0: in combat, or not known yet
+		struct IllusionState
+		{
+			uint64_t    EndsAt = 0; // event time it runs out
+			std::string Caster;
+		};
+		struct RecentEvent
+		{
+			uint64_t    TimeMs;
+			std::string Account;
+		};
+		std::unordered_map<std::string, IllusionState> m_Illusions; // who is under Illusion of Life
+		// The first Illusion of Life of a session arrives without its effect's apply: every session in the field
+		// logs of 2026-09-15 to 2026-09-17, in a squad and in a party. Until an apply has come through, a
+		// completed cast and an ally getting up at that very instant stand in for it.
+		bool                                          m_IllusionApplySeen = false;
+		std::deque<RecentEvent>                       m_RecentIllusionCasts; // who cast, when it completed
+		std::deque<RecentEvent>                       m_RecentGotUp;         // who got up, when
 		SharedOrder                                   m_Share;
 		bool                                          m_HasShare        = false;
 		std::string                                   m_RequestFrom;

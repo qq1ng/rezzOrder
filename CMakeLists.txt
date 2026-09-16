@@ -32,6 +32,7 @@ target_compile_options(rezz_core PRIVATE ${REZZ_WARNINGS})
 add_library(RezzOrder SHARED
     src/entry.cpp
     src/ArcStyle.cpp
+    src/Banner.cpp
     src/Capture.cpp
     src/Diagnostics.cpp
     src/Fonts.cpp
@@ -77,6 +78,7 @@ add_executable(rezz_uishot
     tools/uishot/main.cpp
     tools/uishot/Host.cpp
     tools/uishot/Scenarios.cpp
+    src/Banner.cpp
     src/Notify.cpp
     src/OrderUi.cpp
     src/Settings.cpp

@@ -104,6 +104,8 @@ namespace Settings
 			else if (key == "overlay_title_bar") { values.OverlayTitleBar = ParseBool(value); }
 			else if (key == "overlay_background") { values.OverlayBackground = ParseBool(value); }
 			else if (key == "overlay_width") { values.OverlayWidth = ParseFloat(value, values.OverlayWidth); }
+			else if (key == "overlay_filled_width") { values.OverlayFilledWidth = ParseFloat(value, values.OverlayFilledWidth); }
+			else if (key == "overlay_filled_height") { values.OverlayFilledHeight = ParseFloat(value, values.OverlayFilledHeight); }
 			else if (key == "overlay_max_name_length") { values.OverlayMaxNameLength = std::atoi(value.c_str()); }
 			else if (key == "overlay_max_rows") { values.OverlayMaxRows = std::atoi(value.c_str()); }
 			else if (key == "prefer_account") { values.PreferAccount = ParseBool(value); }
@@ -127,6 +129,25 @@ namespace Settings
 			else if (key == "backup_flash_color") { ParseColor(value, values.BackupFlashColor); }
 			else if (key == "last_seen_version") { values.LastSeenVersion = value; }
 			else if (key == "editor_all_professions") { values.EditorAllProfessions = ParseBool(value); }
+			else if (key == "overlay_messages") { values.OverlayMessages = std::atoi(value.c_str()); }
+			else if (key == "banner_style") { values.BannerStyle = std::atoi(value.c_str()); }
+			else if (key == "banner_info_size") { values.BannerInfoSize = ParseFloat(value, values.BannerInfoSize); }
+			else if (key == "banner_info_x") { values.BannerInfoX = ParseFloat(value, values.BannerInfoX); }
+			else if (key == "banner_info_y") { values.BannerInfoY = ParseFloat(value, values.BannerInfoY); }
+			else if (key == "banner_alert_size") { values.BannerAlertSize = ParseFloat(value, values.BannerAlertSize); }
+			else if (key == "banner_alert_x") { values.BannerAlertX = ParseFloat(value, values.BannerAlertX); }
+			else if (key == "banner_alert_y") { values.BannerAlertY = ParseFloat(value, values.BannerAlertY); }
+			else if (key == "banner_info_color") { ParseColor(value, values.BannerInfoColor); }
+			else if (key == "banner_up_color") { ParseColor(value, values.BannerUpColor); }
+			else if (key == "banner_backup_color") { ParseColor(value, values.BannerBackupColor); }
+			else if (key == "banner_illusion_color") { ParseColor(value, values.BannerIllusionColor); }
+			else if (key == "banner_seconds") { values.BannerSeconds = ParseFloat(value, values.BannerSeconds); }
+			else if (key == "illusion_countdown") { values.IllusionCountdown = ParseBool(value); }
+			else if (key == "illusion_warn_seconds") { values.IllusionWarnSeconds = std::atoi(value.c_str()); }
+			else if (key == "illusion_sound") { values.IllusionSound = std::atoi(value.c_str()); }
+			else if (key == "illusion_flash") { values.IllusionFlash = ParseBool(value); }
+			else if (key == "illusion_flash_color") { ParseColor(value, values.IllusionFlashColor); }
+			else if (key == "illusion_number_below") { values.IllusionNumberBelow = ParseBool(value); }
 			else if (key == "record_field_logs") { values.RecordFieldLogs = ParseBool(value); }
 		}
 		Current = values;
@@ -177,6 +198,8 @@ namespace Settings
 			out << "overlay_title_bar=" << v.OverlayTitleBar << "\n";
 			out << "overlay_background=" << v.OverlayBackground << "\n";
 			out << "overlay_width=" << v.OverlayWidth << "\n";
+			out << "overlay_filled_width=" << v.OverlayFilledWidth << "\n";
+			out << "overlay_filled_height=" << v.OverlayFilledHeight << "\n";
 			out << "overlay_max_name_length=" << v.OverlayMaxNameLength << "\n";
 			out << "overlay_max_rows=" << v.OverlayMaxRows << "\n";
 			out << "prefer_account=" << v.PreferAccount << "\n";
@@ -200,6 +223,25 @@ namespace Settings
 			out << "backup_flash_color=" << WriteColor(v.BackupFlashColor) << "\n";
 			out << "last_seen_version=" << v.LastSeenVersion << "\n";
 			out << "editor_all_professions=" << v.EditorAllProfessions << "\n";
+			out << "overlay_messages=" << v.OverlayMessages << "\n";
+			out << "banner_style=" << v.BannerStyle << "\n";
+			out << "banner_info_size=" << v.BannerInfoSize << "\n";
+			out << "banner_info_x=" << v.BannerInfoX << "\n";
+			out << "banner_info_y=" << v.BannerInfoY << "\n";
+			out << "banner_alert_size=" << v.BannerAlertSize << "\n";
+			out << "banner_alert_x=" << v.BannerAlertX << "\n";
+			out << "banner_alert_y=" << v.BannerAlertY << "\n";
+			out << "banner_info_color=" << WriteColor(v.BannerInfoColor) << "\n";
+			out << "banner_up_color=" << WriteColor(v.BannerUpColor) << "\n";
+			out << "banner_backup_color=" << WriteColor(v.BannerBackupColor) << "\n";
+			out << "banner_illusion_color=" << WriteColor(v.BannerIllusionColor) << "\n";
+			out << "banner_seconds=" << v.BannerSeconds << "\n";
+			out << "illusion_countdown=" << v.IllusionCountdown << "\n";
+			out << "illusion_warn_seconds=" << v.IllusionWarnSeconds << "\n";
+			out << "illusion_sound=" << v.IllusionSound << "\n";
+			out << "illusion_flash=" << v.IllusionFlash << "\n";
+			out << "illusion_flash_color=" << WriteColor(v.IllusionFlashColor) << "\n";
+			out << "illusion_number_below=" << v.IllusionNumberBelow << "\n";
 			out << "record_field_logs=" << v.RecordFieldLogs << "\n";
 		}
 		std::filesystem::rename(temp, s_File, ec);

@@ -7,9 +7,12 @@
 // Writes <dir>/<scenario>.png, <dir>/report.txt (a diffable dump of what each layout drew) and
 // <dir>/README.md. Exit code 1 if a scenario drew nothing.
 
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <Windows.h>
@@ -19,6 +22,7 @@
 #include "imgui/imgui.h"
 #include "imgui/backends/imgui_impl_dx11.h"
 
+#include "Banner.h"
 #include "Demo.h"
 #include "Host.h"
 #include "Notify.h"
@@ -192,7 +196,26 @@ namespace
 				Settings::Current.OverlayWidth);
 			fail(message);
 		}
-		if (aInfo.Width > kWidth * 0.75f || aInfo.Height > kHeight * 0.9f) { fail("the window is bigger than the shot"); }
+		if (aInfo.X + aInfo.Width > kWidth || aInfo.Y + aInfo.Height > kHeight) { fail("the window runs off the screen"); }
+
+		// The rows are the order itself, started wherever the turn is: one rotation of it, nobody moved out of
+		// place. The card of "focus" and "next up" is drawn apart from its list, and "next up" pulls the backup
+		// up directly under its card on purpose.
+		std::vector<int> numbers;
+		for (size_t r = 0; r < aInfo.Rows.size(); r++)
+		{
+			if (r == 0 && (aInfo.Layout == "focus" || aInfo.Layout == "nextup")) { continue; }
+			if (aInfo.Layout == "nextup" && aInfo.Rows[r].find(". BK ") != std::string::npos) { continue; }
+			numbers.push_back(std::atoi(aInfo.Rows[r].c_str()));
+		}
+		int drops = 0;
+		for (size_t r = 1; r < numbers.size(); r++) { if (numbers[r] <= numbers[r - 1]) { drops++; } }
+		if (!(drops == 0 || (drops == 1 && numbers.back() < numbers.front())))
+		{
+			std::string drawn;
+			for (int number : numbers) { drawn += std::to_string(number) + " "; }
+			fail("rows are not in the order's sequence: " + drawn);
+		}
 
 		return failures;
 	}
@@ -265,6 +288,7 @@ int main(int argc, char** argv)
 		"![every layout](all-layouts.png)\n\n![states and options](all-states.png)\n\n## Every render\n\n";
 	int failures = 0;
 	int written = 0;
+	std::unordered_map<std::string, std::pair<float, float>> sizes; // scenario -> window size, for SameSizeAs
 
 	for (const Shots::Scenario& scenario : Shots::All())
 	{
@@ -276,10 +300,19 @@ int main(int argc, char** argv)
 		Settings::Current.OverlayBgAlpha = 0.55f;
 		Settings::Current.MatchArcDps = false;
 		if (scenario.Tweak) { scenario.Tweak(Settings::Current); }
+		// A scenario compared with an earlier one starts from that one's size as the last size seen with an order,
+		// the way the game remembers it: that is what an empty window has to keep.
+		if (auto earlier = sizes.find(scenario.SameSizeAs); !scenario.SameSizeAs.empty() && earlier != sizes.end())
+		{
+			Settings::Current.OverlayFilledWidth = earlier->second.first;
+			Settings::Current.OverlayFilledHeight = earlier->second.second;
+		}
 
 		// Demo mode is per-scenario state: only the scenarios that ask for it run with it.
 		Rezz::Demo::Stop();
 		Notify::Reset(); // each scenario is its own moment: no signal carries over
+		OrderUi::ClearNotices();
+		Banner::Clear();
 		OrderUi::ShotMenu = scenario.Menu;
 		Rezz::SessionView view = scenario.Build();
 		Settings::Current.Order = view.Order;
@@ -289,6 +322,9 @@ int main(int argc, char** argv)
 		Settings::Current.OverlayVisible = !editor;
 
 		// The window settles its size on the first frame; the third is what gets saved.
+		// The turn window takes its saved position only when it first appears, which it did in an earlier
+		// scenario; one that places it somewhere else has to move it there.
+		ImGui::SetWindowPos("###rezzorder_overlay", ImVec2(Settings::Current.OverlayX, Settings::Current.OverlayY));
 		for (int i = 0; i < 3; i++) { Frame(scenario, i); }
 
 		static OrderUi::FrameInfo wholeScreen;
@@ -300,7 +336,18 @@ int main(int argc, char** argv)
 		wholeScreen.X = 24.0f;
 		wholeScreen.Y = 24.0f;
 
-		const OrderUi::FrameInfo& info = scenario.Shows == Shots::Scenario::Window::Screen ? wholeScreen
+		static OrderUi::FrameInfo banners;
+		banners = OrderUi::FrameInfo{};
+		Banner::Area area = Banner::LastArea();
+		banners.Drawn = area.Width > 0.0f;
+		banners.Layout = "banners";
+		banners.X = area.X;
+		banners.Y = area.Y;
+		banners.Width = area.Width;
+		banners.Height = area.Height;
+
+		const OrderUi::FrameInfo& info = scenario.Shows == Shots::Scenario::Window::Banners ? banners
+			: scenario.Shows == Shots::Scenario::Window::Screen ? wholeScreen
 			: scenario.Shows == Shots::Scenario::Window::Editor ? OrderUi::LastEditorFrame
 			: scenario.Shows == Shots::Scenario::Window::Share ? OrderUi::LastShareFrame
 			: scenario.Shows == Shots::Scenario::Window::Request ? OrderUi::LastRequestFrame : OrderUi::LastFrame;
@@ -313,6 +360,14 @@ int main(int argc, char** argv)
 		const int margin = 24;
 		float left = info.X, top = info.Y;
 		float right = info.X + info.Width, bottom = info.Y + info.Height;
+		if (info.MessagesWidth > 0.0f)
+		{
+			// The messages strip is a window of its own against one edge.
+			left = std::min(left, info.MessagesX);
+			top = std::min(top, info.MessagesY);
+			right = std::max(right, info.MessagesX + info.MessagesWidth);
+			bottom = std::max(bottom, info.MessagesY + info.MessagesHeight);
+		}
 		if (info.MenuWidth > 0.0f)
 		{
 			// An open menu is its own window beside the one it belongs to: the shot has to hold both.
@@ -326,6 +381,23 @@ int main(int argc, char** argv)
 		int width = static_cast<int>(right - left) + margin * 2;
 		int height = static_cast<int>(bottom - top) + margin * 2;
 		if (scenario.Shows == Shots::Scenario::Window::Overlay) { failures += Validate(scenario, view, info); }
+		sizes[scenario.Name] = { info.Width, info.Height };
+		if (!scenario.SameSizeAs.empty())
+		{
+			auto other = sizes.find(scenario.SameSizeAs);
+			if (other == sizes.end())
+			{
+				std::printf("FAILED %s: compared with %s, which has not been rendered\n", scenario.Name.c_str(),
+					scenario.SameSizeAs.c_str());
+				failures++;
+			}
+			else if (std::fabs(other->second.first - info.Width) > 0.5f || std::fabs(other->second.second - info.Height) > 0.5f)
+			{
+				std::printf("FAILED %s: %.0fx%.0f, but %s is %.0fx%.0f\n", scenario.Name.c_str(), info.Width, info.Height,
+					scenario.SameSizeAs.c_str(), other->second.first, other->second.second);
+				failures++;
+			}
+		}
 
 		std::string file = outDir + "/" + scenario.Name + ".png";
 		// Windows hands a just-written PNG to its thumbnailer and indexer, which briefly hold it open; a

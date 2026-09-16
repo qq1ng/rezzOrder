@@ -18,6 +18,8 @@
 //   - Only the player whose turn it was moves the rotation on. Somebody casting out of turn (including a
 //     precast player firing early) spends their own skill and leaves everyone else's place alone.
 //   - Players whose skill is on cooldown, or who are downed or dead, are skipped.
+//   - During a fight the turn keeps moving down the list: a player whose skill comes back waits until the list
+//     comes round to them again. Out of a fight it starts again from the top (the session calls ResetRotation).
 namespace Rezz
 {
 	enum class LifeState : uint8_t { Alive, Downed, Dead };
@@ -88,6 +90,8 @@ namespace Rezz
 		// Takes one player out without restarting the rotation: somebody leaving is not a new order, and the
 		// people still in it keep their turn. Returns whether they were in the order at all.
 		bool RemoveFromOrder(const std::string& aAccount);
+		// Forgets who cast last, so the turn starts again from the first player who can revive.
+		void ResetRotation() { m_LastOrderedUser.clear(); }
 		const std::vector<std::string>& Order() const { return m_Order; }
 
 		void OnCastStart(uint64_t aTimeMs, const std::string& aAccount, uint32_t aSkillId);

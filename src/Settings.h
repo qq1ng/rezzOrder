@@ -45,6 +45,8 @@ namespace Settings
 		bool  OverlayTitleBar   = false;
 		bool  OverlayBackground = true;
 		float OverlayWidth      = 0.0f;         // narrowest the window may be; 0: as wide as the rows need
+		float OverlayFilledWidth  = 0.0f;       // the window's size the last time it showed an order, kept while
+		float OverlayFilledHeight = 0.0f;       // ... there is none so it still fills its place among other windows
 		int   OverlayMaxNameLength = 0;         // 0: full name
 		int   OverlayMaxRows       = 0;         // 0: everyone in the order
 		bool  PreferAccount   = false;          // always account names, even when the character name is usable
@@ -75,6 +77,28 @@ namespace Settings
 
 		std::string LastSeenVersion;            // the "all set" alert is for the first run of a new build
 		bool  EditorAllProfessions = false;     // editor lists professions without a revive skill too
+		int   OverlayMessages = 0;              // passing messages: 0 below the turn window, 1 above it, 2 not shown
+		int   BannerStyle   = 1;                // Banner::Style
+		// Two groups of banners, each with its own size (times the overlay's base font size) and place (percent of
+		// the screen: the middle of the stack across, its top down). Messages: somebody left, an order was shared,
+		// a problem. Alerts: your turn, backup, the Illusion of Life countdown.
+		float BannerInfoSize  = 1.3f;
+		float BannerInfoX     = 50.0f;
+		float BannerInfoY     = 20.0f;
+		float BannerAlertSize = 2.2f;
+		float BannerAlertX    = 50.0f;
+		float BannerAlertY    = 30.0f;
+		float BannerInfoColor[3]     = { 0.93f, 0.93f, 0.95f };
+		float BannerUpColor[3]       = { 0.35f, 0.95f, 0.40f };
+		float BannerBackupColor[3]   = { 1.00f, 0.62f, 0.15f };
+		float BannerIllusionColor[3] = { 0.90f, 0.50f, 1.00f };
+		float BannerSeconds = 4.0f;             // how long a banner stays on screen, fade included
+		bool  IllusionCountdown   = true;       // banner counting down before a player revived by Illusion of Life goes down
+		int   IllusionWarnSeconds = 5;          // ... starting this many seconds before
+		int   IllusionSound = 7;                // Notify::Sound when the countdown starts: the bell
+		bool  IllusionFlash = true;
+		float IllusionFlashColor[3] = { 0.82f, 0.35f, 0.95f }; // pink-purple: nothing like your turn or backup
+		bool  IllusionNumberBelow = true;       // the countdown's figures under the names, nearer the middle of the screen
 		// The field recorder writes squad members' account and character names to a CSV. It exists to collect
 		// test data, so it is off unless somebody deliberately turns it on.
 		bool  RecordFieldLogs = false;

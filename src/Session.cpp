@@ -196,12 +196,13 @@ namespace Rezz
 
 		switch (sc)
 		{
-			case ArcDps::CBTS_SQCOMBATSTART: m_CombatSinceMs = aNowMs; return;
-			case ArcDps::CBTS_SQCOMBATEND:   m_CombatSinceMs = 0; return;
+			case ArcDps::CBTS_SQCOMBATSTART: m_CombatSinceMs = aNowMs; m_OutOfCombatSinceMs = 0; return;
+			case ArcDps::CBTS_SQCOMBATEND:   m_CombatSinceMs = 0; m_OutOfCombatSinceMs = aNowMs; return;
 			case ArcDps::CBTS_ENTERCOMBAT:
 			{
-				// Fallback when the squad-wide events don't arrive.
-				if (m_CombatSinceMs == 0) { m_CombatSinceMs = aNowMs; }
+				// Fallback when the squad-wide events don't arrive. Somebody fighting again also means the break
+				// that would have reset the turn is over.
+				if (m_CombatSinceMs == 0) { m_CombatSinceMs = aNowMs; m_OutOfCombatSinceMs = 0; }
 				std::string account = ResolveAccount(srcId, ev.SrcInstId);
 				if (!account.empty()) { GetMember(account).LastEventMs = aNowMs; }
 				return;
@@ -232,7 +233,12 @@ namespace Rezz
 					return;
 				}
 				std::string account = ResolveAccount(srcId, ev.SrcInstId);
-				if (!account.empty()) { m_Tracker.OnCastStop(ev.Time, account, ev.SkillId, ev.Result, ev.BuffDmg); }
+				if (account.empty()) { return; }
+				m_Tracker.OnCastStop(ev.Time, account, ev.SkillId, ev.Result, ev.BuffDmg);
+				if (!m_IllusionApplySeen && skill->Group == ReviveGroup::IllusionOfLife && CountsAsUsed(*skill, ev.Result, ev.BuffDmg))
+				{
+					MatchIllusion(ev.Time, account, true);
+				}
 				return;
 			}
 			case ArcDps::CBTS_CHANGEDOWN:
@@ -245,6 +251,10 @@ namespace Rezz
 				LifeState state = sc == ArcDps::CBTS_CHANGEDOWN ? LifeState::Downed
 					: sc == ArcDps::CBTS_CHANGEDEAD ? LifeState::Dead : LifeState::Alive;
 				m_Tracker.OnLifeState(ev.Time, account, state);
+				// Down or dead under Illusion of Life: either it ran out, or they went down before it did. Both
+				// leave nothing to warn about.
+				if (state != LifeState::Alive) { m_Illusions.erase(account); }
+				if (sc == ArcDps::CBTS_CHANGEUP && !m_IllusionApplySeen) { MatchIllusion(ev.Time, account, false); }
 				return;
 			}
 			case ArcDps::CBTS_BUFFAPPLY:
@@ -256,12 +266,33 @@ namespace Rezz
 				if (account.empty()) { return; }
 				GetMember(account).LastEventMs = aNowMs;
 
+				// Illusion of Life on them. The effect itself is the only sure sign of who a cast revived: another
+				// revive landing at the same moment, or a rally off an enemy dying, gets a player up without it
+				// (field log 2026-09-15: four allies up at the instant of a cast that can only take three).
+				if (ev.SkillId == kIllusionOfLifeEffect)
+				{
+					m_IllusionApplySeen = true;
+					uint64_t length = ev.Value > 0 ? static_cast<uint64_t>(ev.Value) : 15000;
+					m_Illusions[account] = IllusionState{ ev.Time + length, ResolveAccount(srcId, ev.SrcInstId) };
+					return;
+				}
+
 				// A signet passive shows the signet is slotted, and that it is off cooldown right now.
 				ReviveGroup group = ev.SkillId == kSignetOfMercyPassive ? ReviveGroup::SignetOfMercy
 					: ev.SkillId == kSignetOfUndeathPassive ? ReviveGroup::SignetOfUndeath : ReviveGroup::Count;
 				if (group == ReviveGroup::Count) { return; }
 				GetMember(account).SeenGroups |= GroupBit(group);
 				m_Tracker.MarkSkillReady(ev.Time, account, group);
+				return;
+			}
+			case ArcDps::CBTS_BUFFREMOVE_ALL:
+			case ArcDps::CBTS_BUFFREMOVE_SINGLE:
+			{
+				// Illusion of Life ending early: they killed something and rallied, so there is nothing left to
+				// count down (field test 2026-09-16: removed with 4962 ms left at the moment the enemy died).
+				if (ev.SkillId != kIllusionOfLifeEffect) { return; }
+				std::string account = ResolveAccount(srcId, ev.SrcInstId); // on a removal, src is who loses it
+				if (!account.empty()) { m_Illusions.erase(account); }
 				return;
 			}
 			default:
@@ -286,6 +317,9 @@ namespace Rezz
 			member.IsSelf = true;
 			// Back from a loading screen: check afterwards who really came back with us.
 			if (added) { m_ResyncAtMs = aNowMs + kResyncAfterMs; }
+			// Whether a new map also swallows the first Illusion of Life apply isn't known yet, so the stand-in is
+			// ready again after every one. Once an apply comes through it steps aside.
+			if (added) { m_IllusionApplySeen = false; }
 			if (!added)
 			{
 				// Our own map change: the squad leaves just before this are not real leaves.
@@ -394,6 +428,59 @@ namespace Rezz
 		std::erase(m_Precast, aAccount);
 	}
 
+	void Session::MatchIllusion(uint64_t aTimeMs, const std::string& aAccount, bool aIsCast)
+	{
+		// In the field logs the ally gets up at exactly the millisecond the cast completes, and the two events
+		// arrive in either order. Anyone getting up at any other moment was revived some other way.
+		constexpr uint64_t kSameInstantMs = 50;
+		constexpr uint64_t kKeepMs        = 2000;
+		constexpr uint64_t kLengthMs      = 15000;
+		constexpr int      kTargets       = 3;
+		auto stale = [aTimeMs](const RecentEvent& aEvent) { return aEvent.TimeMs + kKeepMs < aTimeMs; };
+		std::erase_if(m_RecentIllusionCasts, stale);
+		std::erase_if(m_RecentGotUp, stale);
+		auto sameInstant = [aTimeMs](uint64_t aOther) { return (aOther > aTimeMs ? aOther - aTimeMs : aTimeMs - aOther) <= kSameInstantMs; };
+
+		if (aIsCast)
+		{
+			int targets = 0;
+			for (const RecentEvent& up : m_RecentGotUp)
+			{
+				if (targets == kTargets || !sameInstant(up.TimeMs) || up.Account == aAccount) { continue; }
+				m_Illusions[up.Account] = IllusionState{ aTimeMs + kLengthMs, aAccount };
+				targets++;
+			}
+			m_RecentIllusionCasts.push_back(RecentEvent{ aTimeMs, aAccount });
+			return;
+		}
+
+		for (const RecentEvent& cast : m_RecentIllusionCasts)
+		{
+			if (!sameInstant(cast.TimeMs) || cast.Account == aAccount) { continue; }
+			m_Illusions[aAccount] = IllusionState{ cast.TimeMs + kLengthMs, cast.Account };
+			break;
+		}
+		m_RecentGotUp.push_back(RecentEvent{ aTimeMs, aAccount });
+	}
+
+	// Whether we could revive somebody right now: a revive profession, on our feet, on this map, and a revive
+	// skill that is ready. Not having seen our skill used yet counts as ready, as it does in the order.
+	bool Session::SelfCanRevive(uint64_t aNowMs) const
+	{
+		if (m_SelfAccount.empty()) { return false; }
+		auto member = m_Roster.find(m_SelfAccount);
+		if (member == m_Roster.end() || !IsReviveProfession(member->second.Profession)) { return false; }
+		const PlayerStatus* self = m_Tracker.FindPlayer(m_SelfAccount);
+		if (self == nullptr) { return true; }
+		if (self->Away || self->Life != LifeState::Alive) { return false; }
+		if (self->Skills.empty()) { return true; }
+		for (const SkillStatus& skill : self->Skills)
+		{
+			if (skill.State == SkillState::Ready || (skill.State == SkillState::Cooldown && skill.ReadyAtMs <= aNowMs)) { return true; }
+		}
+		return false;
+	}
+
 	void Session::OnSelfLeftSquad()
 	{
 		// Map changes never report role None (field log); it only comes when we really left, or at startup
@@ -409,6 +496,20 @@ namespace Rezz
 
 	void Session::Tick(uint64_t aNowMs)
 	{
+		std::erase_if(m_Illusions, [aNowMs](const auto& aEntry) { return aEntry.second.EndsAt <= aNowMs; });
+
+		// Out of a fight the turn is always at the top of the order (decided with the squad, 2026-09-16).
+		// Field test: whoever cast last was remembered into the next fight, so the turn started somewhere in
+		// the middle of the list with every skill ready, and reordering anyone was the only way back. A break
+		// shorter than kRotationResetMs is the same fight carrying on, and the rotation carries on with it.
+		// It holds for as long as the squad stays out of combat, so a revive used between fights (or before the
+		// first one) doesn't carry into the next fight either.
+		if (m_CombatSinceMs == 0)
+		{
+			if (m_OutOfCombatSinceMs == 0) { m_OutOfCombatSinceMs = aNowMs; }
+			if (aNowMs >= m_OutOfCombatSinceMs + kRotationResetMs) { m_Tracker.ResetRotation(); }
+		}
+
 		// Anyone in the order who didn't come back after our own map change left while we were loading.
 		// Unofficial Extras reports a squad leave at once, even while we are loading, so this fallback is
 		// only needed when it isn't running.
@@ -566,6 +667,16 @@ namespace Rezz
 		view.SelfAccount = m_SelfAccount;
 		view.SquadInCombat = m_CombatSinceMs != 0;
 		view.NowMs = aNowMs;
+		view.SelfCanRevive = SelfCanRevive(aNowMs);
+		for (const auto& [account, illusion] : m_Illusions)
+		{
+			// Our own Illusion of Life is no use to warn us about: we can't revive ourselves.
+			if (account == m_SelfAccount || illusion.EndsAt <= aNowMs) { continue; }
+			bool ourCast = !m_SelfAccount.empty() && illusion.Caster == m_SelfAccount;
+			view.Illusions.push_back(IllusionTarget{ account, illusion.EndsAt - aNowMs, ourCast });
+		}
+		std::sort(view.Illusions.begin(), view.Illusions.end(),
+			[](const IllusionTarget& a, const IllusionTarget& b) { return a.EndsInMs < b.EndsInMs; });
 
 		view.Roster.reserve(m_Roster.size());
 		for (const auto& [account, member] : m_Roster) { view.Roster.push_back(member); }

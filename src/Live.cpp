@@ -21,8 +21,11 @@ namespace Live
 	{
 		if (aData == nullptr || aData->Ev == nullptr) { return; }
 		uint8_t sc = aData->Ev->IsStatechange;
-		// Cheap filter before taking the lock: only these statechanges matter to the session.
-		if (sc != ArcDps::CBTS_ANIMATIONSTART && sc != ArcDps::CBTS_ANIMATIONSTOP && sc != ArcDps::CBTS_CHANGEDOWN &&
+		// Cheap filter before taking the lock: only these statechanges matter to the session. Buff removals are
+		// frequent, so of those only the end of Illusion of Life gets through.
+		bool illusionEnds = (sc == ArcDps::CBTS_BUFFREMOVE_ALL || sc == ArcDps::CBTS_BUFFREMOVE_SINGLE) &&
+			aData->Ev->SkillId == kIllusionOfLifeEffect;
+		if (!illusionEnds && sc != ArcDps::CBTS_ANIMATIONSTART && sc != ArcDps::CBTS_ANIMATIONSTOP && sc != ArcDps::CBTS_CHANGEDOWN &&
 			sc != ArcDps::CBTS_CHANGEUP && sc != ArcDps::CBTS_CHANGEDEAD && sc != ArcDps::CBTS_BUFFAPPLY &&
 			sc != ArcDps::CBTS_BUFFINITIAL && sc != ArcDps::CBTS_ENTERCOMBAT && sc != ArcDps::CBTS_SQCOMBATSTART &&
 			sc != ArcDps::CBTS_SQCOMBATEND)

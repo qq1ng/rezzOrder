@@ -1,4 +1,6 @@
 #include <atomic>
+#include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <stdexcept>
@@ -10,6 +12,7 @@
 #include "nexus/Nexus.h"
 
 #include "Arc.h"
+#include "Banner.h"
 #include "Capture.h"
 #include "Demo.h"
 #include "Diagnostics.h"
@@ -19,6 +22,7 @@
 #include "Notify.h"
 #include "OrderUi.h"
 #include "Settings.h"
+#include "Timing.h"
 #include "Ui.h"
 #include "unofficial_extras/Definitions.h"
 
@@ -87,6 +91,22 @@ namespace
 		s_Api->Log(LOGL_WARNING, ADDON_NAME, message.c_str());
 	}
 
+	// Longer than this and a callback is felt as a hitch (a frame is 7 to 16 ms), so it goes into the Nexus log
+	// along with the step that took the time. Field test 2026-09-16 had the game stalling for half a second
+	// every second or so late in a long session, with nothing to say whether this addon was the cause.
+	constexpr double kSlowCallMs = 40.0;
+	std::atomic<int> s_SlowReports{0};
+
+	void LogSlow(const char* aWhat, double aMs, const Timing::Slowest& aStep)
+	{
+		// Enough lines to see a pattern; a stall that repeats all session must not fill the log.
+		if (s_SlowReports.fetch_add(1) >= 50 || s_Api == nullptr) { return; }
+		char line[256];
+		std::snprintf(line, sizeof(line), "%s took %.0f ms (slowest step: %s, %.0f ms)", aWhat, aMs,
+			aStep.Name[0] ? aStep.Name : "not timed", aStep.Ms);
+		s_Api->Log(LOGL_WARNING, ADDON_NAME, line);
+	}
+
 	template <typename F>
 	void Guarded(const char* aWhat, F&& aFunction)
 	{
@@ -94,9 +114,13 @@ namespace
 		s_InFlight.fetch_add(1);
 		if (s_Alive.load())
 		{
+			Timing::Reset();
+			auto start = std::chrono::steady_clock::now();
 			try                             { aFunction(); }
 			catch (const std::exception& e) { LogFailure(aWhat, e.what()); }
 			catch (...)                     { LogFailure(aWhat, "unknown exception"); }
+			double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+			if (ms >= kSlowCallMs) { LogSlow(aWhat, ms, Timing::Current()); }
 		}
 		s_InFlight.fetch_sub(1);
 	}
@@ -108,8 +132,8 @@ namespace
 		Guarded("the squad combat event", [aArgs]
 		{
 			auto* data = static_cast<ArcDps::EvCombatData*>(aArgs);
-			Live::OnCombatSquad(data);
-			Capture::OnCombat(Capture::CH_SQUAD, data);
+			{ Timing::Step step("session"); Live::OnCombatSquad(data); }
+			{ Timing::Step step("field recorder"); Capture::OnCombat(Capture::CH_SQUAD, data); }
 		});
 	}
 
@@ -208,11 +232,6 @@ namespace
 		}
 	}
 
-	void OnStandingBanner(const std::string& aText)
-	{
-		if (s_Api) { s_Api->GUI_SendAlert(("Rezz Order: " + aText).c_str()); }
-	}
-
 	void CheckDependencies(uint32_t aNowMs)
 	{
 		if (!Ui::Deps.Checked && aNowMs - s_LoadMs >= kDependencyCheckAfterMs)
@@ -227,14 +246,14 @@ namespace
 				// Only on the first run of a build: after that the player knows it works.
 				if (Settings::Current.LastSeenVersion != ADDON_VERSION_STRING)
 				{
-					s_Api->GUI_SendAlert("Rezz Order " ADDON_VERSION_STRING ": all set.");
+					Banner::Show(Banner::Kind::Info, "Rezz Order " ADDON_VERSION_STRING ": all set.", aNowMs);
 					Settings::Current.LastSeenVersion = ADDON_VERSION_STRING;
 					Settings::MarkDirty();
 				}
 			}
 			else
 			{
-				s_Api->GUI_SendAlert(("Rezz Order problem: " + problems).c_str());
+				Banner::Show(Banner::Kind::Problem, "Rezz Order problem: " + problems, aNowMs);
 			}
 		}
 
@@ -246,7 +265,7 @@ namespace
 		{
 			s_NoDataAlerted = true;
 			Capture::LogInfo("no arcdps events after 90 s on a WvW map");
-			s_Api->GUI_SendAlert("Rezz Order problem: no combat data from ArcDPS yet. Is ArcDPS enabled?");
+			Banner::Show(Banner::Kind::Problem, "Rezz Order problem: no combat data from ArcDPS yet. Is ArcDPS enabled?", aNowMs);
 		}
 	}
 
@@ -270,15 +289,18 @@ namespace
 			tick.Position[1] = s_Mumble->AvatarPosition.Y;
 			tick.Position[2] = s_Mumble->AvatarPosition.Z;
 		}
-		Capture::Tick(tick);
-		CheckDependencies(now);
+		{ Timing::Step step("field recorder tick"); Capture::Tick(tick); }
+		{ Timing::Step step("dependency check"); CheckDependencies(now); }
 
-		Live::Tick();
-		for (const Rezz::Notice& notice : Live::TakeNotices())
+		{ Timing::Step step("session tick"); Live::Tick(); }
 		{
-			OrderUi::AddNotice(notice.Text, now);
-			if (notice.Kind == Rezz::NoticeKind::OrderCleared) { OrderUi::OnOrderCleared(); }
-			if (WantsBanner(notice.Kind)) { s_Api->GUI_SendAlert(("Rezz Order: " + notice.Text).c_str()); }
+			Timing::Step step("roster notices");
+			for (const Rezz::Notice& notice : Live::TakeNotices())
+			{
+				OrderUi::AddNotice(notice.Text, now);
+				if (notice.Kind == Rezz::NoticeKind::OrderCleared) { OrderUi::OnOrderCleared(); }
+				if (WantsBanner(notice.Kind)) { Banner::Show(Banner::Kind::Info, notice.Text, now); }
+			}
 		}
 
 		bool gameplay = s_NexusLink == nullptr || s_NexusLink->IsGameplay;
@@ -287,8 +309,8 @@ namespace
 		context.IsGameplay = gameplay;
 		context.IsMapOpen = s_Mumble && s_Mumble->Context.IsMapOpen;
 		context.InWvw = Capture::GetStatus().InWvw;
-		OrderUi::Render(context);
-		Ui::Render(gameplay);
+		OrderUi::Render(context); // times its own steps
+		{ Timing::Step step("recorder window"); Ui::Render(gameplay); }
 	}
 
 	// If a draw ever throws part way through a window, ImGui's stack is left unbalanced, which is bad. It is
@@ -392,7 +414,6 @@ namespace
 		s_Api->QuickAccess_AddContextMenu(QA_MENU_ITEM, "QA_MENU", OnQuickAccessMenu);
 
 		Notify::Init();
-		OrderUi::StandingBanner = OnStandingBanner;
 		s_Api->Log(LOGL_INFO, ADDON_NAME, "Loaded.");
 	}
 
@@ -413,7 +434,6 @@ namespace
 		s_Api->InputBinds_Deregister(KB_EDITOR);
 		s_Api->InputBinds_Deregister(KB_MARK);
 		s_Api->InputBinds_Deregister(KB_TOGGLE);
-		OrderUi::StandingBanner = nullptr;
 		Notify::Shutdown();
 		s_Api->WndProc_Deregister(OnWndProc);
 

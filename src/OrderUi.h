@@ -16,8 +16,6 @@ namespace OrderUi
 	extern std::atomic<bool> EditorToggleRequested;
 	extern std::atomic<bool> LockToggleRequested;
 	extern std::atomic<bool> CopyOrderRequested; // put the share line on the clipboard
-	// Raises a Nexus banner. Set by the addon entry point; the UI itself knows nothing about Nexus.
-	extern void (*StandingBanner)(const std::string& aText);
 
 	// What the turn window drew last frame. Written every frame and read by the offscreen render harness
 	// (tools/uishot), which crops its screenshots to the window and diffs the row texts between builds.
@@ -29,6 +27,8 @@ namespace OrderUi
 		float                    X = 0, Y = 0, Width = 0, Height = 0;
 		// An open menu, which is its own window and sits outside the one above. Zero when none is open.
 		float                    MenuX = 0, MenuY = 0, MenuWidth = 0, MenuHeight = 0;
+		// The strip of passing messages against the window's edge, also its own window. Zero when not shown.
+		float                    MessagesX = 0, MessagesY = 0, MessagesWidth = 0, MessagesHeight = 0;
 		bool                     Drawn = false;
 	};
 
@@ -55,6 +55,8 @@ namespace OrderUi
 	void Options();
 	// A roster notice to show in the overlay for a while.
 	void AddNotice(const std::string& aText, unsigned aNowMs);
+	// Drops every message at once (the render harness, between scenarios).
+	void ClearNotices();
 	// We left the squad: forget the saved order too.
 	void OnOrderCleared();
 }

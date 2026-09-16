@@ -3,7 +3,9 @@
 #include <cstring>
 
 #include "Arc.h"
+#include "Banner.h"
 #include "Demo.h"
+#include "OrderUi.h"
 #include "ReviveSkills.h"
 
 namespace Shots
@@ -239,6 +241,106 @@ namespace Shots
 				[](Settings::Values& s) { Layout(s, L::NextUp); s.OverlayMaxRows = 3; }, OurTurn });
 			list.push_back({ "nextup-all", "next up with no limit: everybody, rolled to the turn",
 				[](Settings::Values& s) { Layout(s, L::NextUp); }, NinePlayers });
+			// Somebody who can't revive sits between the player who is up and the backup. The backup still goes
+			// directly under the card, and every other row shows its place in the order, as the editor does.
+			list.push_back({ "nextup-gap", "next up with a dead player between the one who is up and the backup",
+				[](Settings::Values& s) { Layout(s, L::NextUp); }, [] {
+					Squad squad = Base();
+					squad.Dead(Account(1));
+					return squad.View();
+				} });
+
+			// The window keeps one size whatever it shows. Each layout renders the same order at three very
+			// different moments, and all three must come out the same size: field test 2026-09-16 found "next
+			// up" growing and shrinking with the name on its card, pushing it into the windows beside it.
+			// Passing messages get a strip of their own on the side the player picks, and the turn window keeps
+			// its size while they show (field test 2026-09-16: text appearing at the bottom made the window taller
+			// and pushed it into the windows beside it).
+			auto withNotice = [] {
+				Rezz::SessionView view = Mixed();
+				OrderUi::AddNotice("3. Maryth Solane left the squad, out of the order", static_cast<unsigned>(kNowMs));
+				return view;
+			};
+			list.push_back({ "messages-below", "a squad member left: the message sits under the window",
+				[](Settings::Values& s) { Layout(s, L::Compact); }, withNotice, Scenario::Window::Overlay, -1,
+				"compact-someone-else" });
+			list.push_back({ "messages-above", "the same message, on the side picked for it",
+				[](Settings::Values& s)
+				{
+					Layout(s, L::Compact);
+					s.OverlayMessages = 1;
+					s.OverlayY = 200.0f; // room above for the strip
+				}, withNotice, Scenario::Window::Overlay, -1, "compact-someone-else" });
+
+			// Banners are the addon's own now, so their look can be chosen: the four styles with the same four
+			// messages, newest on top, to put side by side.
+			auto bannerStack = [] {
+				Banner::Show(Banner::Kind::Problem, "Rezz Order problem: no combat data from ArcDPS yet. Is ArcDPS enabled?",
+					static_cast<unsigned>(kNowMs));
+				Banner::Show(Banner::Kind::Info, "Kalden shared a revive order (6 players) - you are now 2. (was 4.)",
+					static_cast<unsigned>(kNowMs));
+				Banner::Show(Banner::Kind::Backup, "Backup", static_cast<unsigned>(kNowMs));
+				Banner::Show(Banner::Kind::Up, "You're up", static_cast<unsigned>(kNowMs));
+				return Mixed();
+			};
+			for (int style = 0; style < static_cast<int>(Banner::Style::Count); style++)
+			{
+				list.push_back({ std::string("banner-") + Banner::StyleName(static_cast<Banner::Style>(style)),
+					"banner style proposal", [style](Settings::Values& s) { s.BannerStyle = style; },
+					bannerStack, Scenario::Window::Banners });
+			}
+
+			// Kalden and Brisa were revived by the same Illusion of Life 11.5 s ago and haven't rallied; we have a
+			// revive ready, so the countdown names them both.
+			list.push_back({ "banner-illusion-countdown", "Illusion of Life running out on two revived players", nullptr,
+				[] {
+					Squad squad = Base();
+					squad.Illusion(Account(1), 11500);
+					squad.Illusion(Account(4), 11480);
+					return squad.View();
+				}, Scenario::Window::Banners });
+			// Two casts running out a second and a half apart: two countdowns side by side, soonest on the left.
+			list.push_back({ "banner-illusion-two-casts", "two Illusions of Life running out at once", nullptr,
+				[] {
+					Squad squad = Base();
+					squad.Illusion(Account(1), 11500);
+					squad.Illusion(Account(4), 11480);
+					squad.Illusion(Account(5), 13000);
+					return squad.View();
+				}, Scenario::Window::Banners });
+			// No order any more: the window keeps the size it had with one, so it still fills its place.
+			list.push_back({ "compact-empty-after-use", "no order, after one was shown: same size as with it",
+				[](Settings::Values& s) { Layout(s, L::Compact); }, Empty, Scenario::Window::Overlay, -1, "compact-someone-else" });
+			list.push_back({ "banner-illusion-number-above", "the same countdown with the seconds above the names",
+				[](Settings::Values& s) { s.IllusionNumberBelow = false; },
+				[] {
+					Squad squad = Base();
+					squad.Illusion(Account(1), 11500);
+					squad.Illusion(Account(4), 11480);
+					return squad.View();
+				}, Scenario::Window::Banners });
+
+			const LayoutCase everyLayout[] = { { "compact", L::Compact }, { "bars", L::Bars }, { "focus", L::Focus },
+				{ "strip", L::Strip }, { "nextup", L::NextUp } };
+			for (const LayoutCase& layout : everyLayout)
+			{
+				L value = layout.Value;
+				std::string first = std::string(layout.Key) + "-size-plain";
+				list.push_back({ first, "size check: someone else is up, ordinary names",
+					[value](Settings::Values& s) { Layout(s, value); }, Mixed });
+				list.push_back({ std::string(layout.Key) + "-size-long-up", "size check: the player who is up has a very long name",
+					[value](Settings::Values& s)
+					{
+						Layout(s, value);
+						s.Nicknames[":Sereth.4127"] = "the one who always runs in first";
+					}, Mixed, Scenario::Window::Overlay, -1, first });
+				list.push_back({ std::string(layout.Key) + "-size-nobody", "size check: nobody ready, a very long name waiting",
+					[value](Settings::Values& s)
+					{
+						Layout(s, value);
+						s.Nicknames[":Kalden.5076"] = "Bartholomew Quickfingers the Second";
+					}, NobodyReady, Scenario::Window::Overlay, -1, first });
+			}
 
 			// Precast players are marked with the same star the chat line uses.
 			list.push_back({ "compact-precast", "two players marked as free to cast early",

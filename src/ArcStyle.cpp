@@ -110,8 +110,12 @@ namespace ArcStyle
 			std::ifstream in(aPath, std::ios::binary);
 			if (!in) { return; }
 
-			Values values;
-			s_Values = values;
+			// Parsed into a copy and only taken over if it worked. arcdps rewrites this file while the game
+			// runs, so a read can land on a half-written file; clearing the values first would drop the font
+			// size back to Nexus' for one read and back again on the next, and every one of those changes makes
+			// Nexus rebuild the font atlas for all addons, which stalls the game.
+			Values previous = s_Values;
+			s_Values = Values{};
 			std::string colors192, colors180, style192, style180;
 			float fontSize = 0.0f;
 
@@ -139,6 +143,8 @@ namespace ArcStyle
 			if (s_Values.FontSize <= 0.0f && fontSize >= 6.0f) { s_Values.FontSize = fontSize; }
 
 			s_Values.Ok = !colors192.empty() || !colors180.empty() || s_Values.HasStyle;
+			// A read that found nothing usable, or lost the font size, keeps what the last good read found.
+			if (previous.Ok && (!s_Values.Ok || s_Values.FontSize <= 0.0f)) { s_Values = previous; }
 		}
 	}
 

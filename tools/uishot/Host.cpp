@@ -4,6 +4,7 @@
 
 #include "Host.h"
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 #include <unordered_map>
@@ -16,6 +17,7 @@
 #include "imgui/imgui.h"
 
 #include "ArcStyle.h"
+#include "Banner.h"
 #include "Fonts.h"
 #include "Icons.h"
 #include "Live.h"
@@ -211,6 +213,20 @@ namespace Fonts
 		ImGui::SetWindowFontScale(1.0f);
 		if (s_Pushed) { ImGui::PopFont(); }
 		s_Pushed = 0;
+	}
+
+	float BannerBasePixels() { return s_BaseSize; }
+
+	// As in the game: one font at the largest size a banner uses, drawn smaller for everything else.
+	ImFont* BannerFont()
+	{
+		const Settings::Values& s = Settings::Current;
+		float biggest = std::max(s.BannerInfoSize, s.BannerAlertSize * Banner::kCountdownNumberScale);
+		ImFont* font = FontAt(s_BaseSize * biggest);
+		if (font != nullptr) { return font; }
+		ImFont* largest = ImGui::GetFont();
+		for (const auto& [size, built] : s_Fonts) { if (built && built->FontSize > largest->FontSize) { largest = built; } }
+		return largest;
 	}
 }
 

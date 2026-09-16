@@ -1,5 +1,6 @@
 #include "Fonts.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -12,6 +13,7 @@
 #include "nexus/Nexus.h"
 
 #include "ArcStyle.h"
+#include "Banner.h"
 #include "Settings.h"
 
 namespace Fonts
@@ -25,11 +27,16 @@ namespace Fonts
 		NexusLinkData_t* s_Link   = nullptr;
 		ImFont*          s_Normal = nullptr;
 		ImFont*          s_Big    = nullptr;
+		ImFont*          s_Banner = nullptr;
 
 		// Nexus keeps fonts by identifier and has no "replace"; a new identifier is used per source change.
 		int         s_Generation = 0;
 		std::string s_NormalId;
 		std::string s_BigId;
+		std::string s_BannerId;
+		float       s_BannerRequested    = 0.0f;
+		float       s_BannerPending      = 0.0f;
+		unsigned    s_BannerPendingSince = 0;
 
 		Settings::FontSource s_Source = Settings::FontSource::Nexus;
 		std::string          s_SourceFile;
@@ -43,6 +50,7 @@ namespace Fonts
 
 		void OnNormal(const char*, void* aFont) { s_Normal = static_cast<ImFont*>(aFont); }
 		void OnBig(const char*, void* aFont)    { s_Big = static_cast<ImFont*>(aFont); }
+		void OnBanner(const char*, void* aFont) { s_Banner = static_cast<ImFont*>(aFont); }
 
 		ImFont* NexusFont() { return s_Link ? static_cast<ImFont*>(s_Link->Font) : nullptr; }
 
@@ -53,6 +61,17 @@ namespace Fonts
 			if (Settings::Current.MatchArcDps && arc.Ok && arc.FontSize >= 6.0f) { return arc.FontSize; }
 			ImFont* base = NexusFont();
 			return base ? base->FontSize : 0.0f;
+		}
+
+		// The largest text any banner draws: the Illusion countdown's figures, usually.
+		float BannerFontPixels()
+		{
+			float base = BaseSize();
+			if (base <= 0.0f) { base = ImGui::GetFontSize(); }
+			const Settings::Values& s = Settings::Current;
+			float largest = std::max(std::clamp(s.BannerInfoSize, 0.5f, 5.0f),
+				std::clamp(s.BannerAlertSize, 0.5f, 5.0f) * Banner::kCountdownNumberScale);
+			return std::max(6.0f, std::round(base * largest));
 		}
 
 		// ArcDPS renders with the TTF next to the game executable if there is one, else with ImGui's built-in
@@ -138,8 +157,9 @@ namespace Fonts
 			if (!s_Requested) { return; }
 			s_Api->Fonts_Release(s_NormalId.c_str(), OnNormal);
 			s_Api->Fonts_Release(s_BigId.c_str(), OnBig);
+			s_Api->Fonts_Release(s_BannerId.c_str(), OnBanner);
 			s_Requested = false;
-			s_Normal = s_Big = nullptr;
+			s_Normal = s_Big = s_Banner = nullptr;
 		}
 
 		void Request(float aSize)
@@ -147,9 +167,12 @@ namespace Fonts
 			s_Generation++;
 			s_NormalId = "REZZORDER_OVERLAY_" + std::to_string(s_Generation);
 			s_BigId = "REZZORDER_OVERLAY_BIG_" + std::to_string(s_Generation);
-			s_Normal = s_Big = nullptr;
+			s_BannerId = "REZZORDER_BANNER_" + std::to_string(s_Generation);
+			s_Normal = s_Big = s_Banner = nullptr;
 			s_Api->Fonts_AddFromMemory(s_NormalId.c_str(), aSize, s_FontData.data(), s_FontData.size(), OnNormal, nullptr);
 			s_Api->Fonts_AddFromMemory(s_BigId.c_str(), std::round(aSize * kBigRatio), s_FontData.data(), s_FontData.size(), OnBig, nullptr);
+			s_BannerRequested = s_BannerPending = BannerFontPixels();
+			s_Api->Fonts_AddFromMemory(s_BannerId.c_str(), s_BannerRequested, s_FontData.data(), s_FontData.size(), OnBanner, nullptr);
 			s_Requested = true;
 			s_RequestedSize = s_PendingSize = aSize;
 		}
@@ -194,6 +217,17 @@ namespace Fonts
 			return;
 		}
 
+		// The banner font follows its own size setting. A change waits until the slider settles, like the
+		// overlay's: every resize rebuilds Nexus' font atlas for all addons.
+		float bannerSize = BannerFontPixels();
+		if (bannerSize == s_BannerRequested) { s_BannerPending = bannerSize; }
+		else if (bannerSize != s_BannerPending) { s_BannerPending = bannerSize; s_BannerPendingSince = aNowMs; }
+		else if (aNowMs - s_BannerPendingSince >= kResizeAfterMs)
+		{
+			s_Api->Fonts_Resize(s_BannerId.c_str(), bannerSize);
+			s_BannerRequested = bannerSize;
+		}
+
 		if (size == s_RequestedSize) { s_PendingSize = size; return; }
 		if (size != s_PendingSize)
 		{
@@ -235,5 +269,20 @@ namespace Fonts
 		ImGui::SetWindowFontScale(1.0f);
 		if (s_Pushed) { ImGui::PopFont(); }
 		s_Pushed = 0;
+	}
+
+	float BannerBasePixels()
+	{
+		float base = BaseSize();
+		return base > 0.0f ? base : ImGui::GetFontSize();
+	}
+
+	ImFont* BannerFont()
+	{
+		if (s_Banner != nullptr && s_Banner->FontSize > 0.0f) { return s_Banner; }
+		// Until ours is built: the biggest font there is, scaled.
+		if (s_Big != nullptr && s_Big->FontSize > 0.0f) { return s_Big; }
+		ImFont* nexus = NexusFont();
+		return nexus ? nexus : ImGui::GetFont();
 	}
 }

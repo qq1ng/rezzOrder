@@ -64,6 +64,10 @@ inline constexpr ReviveSkill kReviveSkills[] = {
 	{ 69336, "Nature's Renewal (2nd slam)",   ReviveGroup::SpiritOfNature,  false, 2, 750  }, // Nature's Vengeance trait
 };
 
+// The effect Illusion of Life leaves on each ally it revives: 15 s, after which they go down again unless they
+// killed something and rallied. Its apply names who it revived; its early removal is the rally.
+inline constexpr uint32_t kIllusionOfLifeEffect = 10346;
+
 const ReviveSkill* FindReviveSkill(uint32_t aSkillId);
 const ReviveGroupInfo& GetGroupInfo(ReviveGroup aGroup);
 

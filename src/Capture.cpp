@@ -46,6 +46,8 @@ namespace Capture
 			5764,  // Renewal of Fire self-revive
 			5765,  // Renewal of Air
 			848,   // Resurrection (after getting up)
+			10346, // Illusion of Life on a revived ally: 15 s, then down again unless they rally. The apply was
+			       // already logged by name; this adds the removal, which is what tells a rally from a timeout.
 		};
 
 		// Players are identified by account name. Character names are unreliable: in Edge of the Mists players

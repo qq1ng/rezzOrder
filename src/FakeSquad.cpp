@@ -110,6 +110,22 @@ namespace Rezz::Fake
 		return *this;
 	}
 
+	Squad& Squad::Illusion(const std::string& aAccount, uint64_t aMsAgo)
+	{
+		const Known& target = Find(aAccount);
+		ArcDps::CombatEvent ev{};
+		ev.Time = At(aMsAgo);
+		ev.IsStatechange = ArcDps::CBTS_BUFFAPPLY;
+		ev.DstAgent = target.Id;
+		ev.DstInstId = target.Instance;
+		ev.SkillId = kIllusionOfLifeEffect;
+		ev.Value = 15000;
+		ArcDps::Agent dst{ "", static_cast<uintptr_t>(target.Id), target.Profession, target.Elite, 0, 0 };
+		ArcDps::EvCombatData data{ &ev, nullptr, &dst, "", 0, 1 };
+		m_Session.OnCombat(data, ev.Time + kFeedDelayMs);
+		return *this;
+	}
+
 	Squad& Squad::Dead(const std::string& aAccount, uint64_t aMsAgo)
 	{
 		Event(At(aMsAgo + 8000), ArcDps::CBTS_CHANGEDOWN, aAccount);

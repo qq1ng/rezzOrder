@@ -367,8 +367,26 @@ namespace
 
 		Rezz::Session session;
 		session.SetOrder(order);
+
+		// A recording started after the squad formed has no join rows for its members, only the periodic SEEN rows
+		// the recorder writes for everyone it knows. Those are enough to put them in the roster up front.
+		std::unordered_map<uint64_t, bool> seeded;
+		for (const Row& row : rows)
+		{
+			if (row["kind"] != "SEEN" || row["dst_name"].empty() || seeded.count(row.U("src_id"))) { continue; }
+			seeded[row.U("src_id")] = true;
+			ArcDps::EvAgentUpdate update{};
+			strncpy_s(update.Account, row["dst_name"].c_str(), _TRUNCATE);
+			strncpy_s(update.Character, row["src_name"].c_str(), _TRUNCATE);
+			update.Id = row.U("src_id");
+			update.Added = 1;
+			update.Self = static_cast<uint32_t>(row.U("src_self"));
+			session.OnAgentUpdate(update, 0);
+		}
+
 		uint64_t lastPrint = 0;
 		size_t notices = 0;
+		std::string lastIllusions;
 		for (const Row& row : rows)
 		{
 			const std::string& kind = row["kind"];
@@ -416,6 +434,27 @@ namespace
 			{
 				notices++;
 				std::printf("%10llu  NOTICE  %s\n", now, notice.Text.c_str());
+			}
+
+			// Who is under Illusion of Life, and whether this client would show the countdown for them: printed
+			// whenever that changes.
+			Rezz::SessionView illusions = session.GetView(now);
+			std::string state;
+			for (const Rezz::IllusionTarget& target : illusions.Illusions)
+			{
+				bool shown = illusions.SelfCanRevive || target.OurCast;
+				state += " " + Rezz::DisplayAccount(target.Account) + (target.OurCast ? "(our cast)" : "") +
+					(shown ? "" : "(not shown)");
+			}
+			if (state != lastIllusions)
+			{
+				std::printf("%10llu  ILLUSION%s\n", now, state.empty() ? " none" : state.c_str());
+				for (const Rezz::IllusionTarget& target : illusions.Illusions)
+				{
+					std::printf("            %s runs out in %llu ms\n", Rezz::DisplayAccount(target.Account).c_str(),
+						static_cast<unsigned long long>(target.EndsInMs));
+				}
+				lastIllusions = state;
 			}
 			if (now >= lastPrint + 5 * 60 * 1000)
 			{

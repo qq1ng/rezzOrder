@@ -444,6 +444,153 @@ namespace
 		CHECK(!t.RemoveFromOrder(P[1])); // already gone
 	}
 
+	// During a fight the turn keeps going down the list, even past a player whose skill has come back. Once the
+	// squad has been out of combat long enough, it starts again from the top. A short lull between two parts of
+	// one fight doesn't count: ArcDPS ends a squad fight at every one of those.
+	// A buff event between two agents: arcdps puts the agent it is applied to in dst on an apply, and the agent
+	// losing it in src on a removal.
+	void BuffEvent(Rezz::Session& aSession, uint64_t aTime, uint8_t aStatechange, uint64_t aSrc, uint16_t aSrcInst,
+		uint64_t aDst, uint16_t aDstInst, int32_t aValue)
+	{
+		ArcDps::CombatEvent ev{};
+		ev.Time = aTime;
+		ev.IsStatechange = aStatechange;
+		ev.SrcAgent = aSrc;
+		ev.SrcInstId = aSrcInst;
+		ev.DstAgent = aDst;
+		ev.DstInstId = aDstInst;
+		ev.SkillId = kIllusionOfLifeEffect;
+		ev.Value = aValue;
+		ArcDps::EvCombatData data{ &ev, nullptr, nullptr, "", 0, 1 };
+		aSession.OnCombat(data, aTime + 2650);
+	}
+
+	// Somebody revived by Illusion of Life goes down again after 15 s unless they kill something. The session
+	// follows the effect itself, and a player whose own revive is ready gets told who is running out.
+	void TestIllusionOfLifeCountdown()
+	{
+		Rezz::Session s;
+		s.OnAgentUpdate(Agent(":me.1", 1, 1, 7, true, true), 0); // us: a mesmer, revive never used, so ready
+		s.OnAgentUpdate(Agent(A, 100, 10, 2, true), 0);
+		s.OnAgentUpdate(Agent(B, 200, 20, 4, true), 0);
+		s.OnAgentUpdate(Agent(C, 300, 30, 6, true), 0);
+
+		// One cast puts it on A and B at 10 s.
+		BuffEvent(s, 10000, ArcDps::CBTS_BUFFAPPLY, 1, 1, 100, 10, 15000);
+		BuffEvent(s, 10000, ArcDps::CBTS_BUFFAPPLY, 1, 1, 200, 20, 15000);
+		Rezz::SessionView view = s.GetView(20000);
+		CHECK(view.SelfCanRevive);
+		CHECK(view.Illusions.size() == 2 && view.Illusions[0].EndsInMs == 5000 && view.Illusions[1].EndsInMs == 5000);
+		CHECK(view.Illusions[0].OurCast && view.Illusions[1].OurCast); // we cast it
+
+		// B kills something: the effect comes off early, and B is no longer on the clock.
+		BuffEvent(s, 21000, ArcDps::CBTS_BUFFREMOVE_ALL, 200, 20, 200, 20, 4000);
+		view = s.GetView(21500);
+		CHECK(view.Illusions.size() == 1 && view.Illusions[0].Account == A && view.Illusions[0].EndsInMs == 3500);
+
+		// A runs out and goes down: nothing left to count.
+		Event(s, 25000, ArcDps::CBTS_CHANGEDOWN, 100, 10, 0);
+		CHECK(s.GetView(25100).Illusions.empty());
+
+		// C is under it but dies first.
+		BuffEvent(s, 30000, ArcDps::CBTS_BUFFAPPLY, 1, 1, 300, 30, 15000);
+		Event(s, 32000, ArcDps::CBTS_CHANGEDEAD, 300, 30, 0);
+		CHECK(s.GetView(33000).Illusions.empty());
+
+		// Ours is not listed: we can't revive ourselves.
+		BuffEvent(s, 40000, ArcDps::CBTS_BUFFAPPLY, 100, 10, 1, 1, 15000);
+		CHECK(s.GetView(41000).Illusions.empty());
+
+		// It runs out untouched: gone once its time is up.
+		BuffEvent(s, 50000, ArcDps::CBTS_BUFFAPPLY, 1, 1, 200, 20, 15000);
+		CHECK(s.GetView(64000).Illusions.size() == 1);
+		s.Tick(65000);
+		CHECK(s.GetView(65000).Illusions.empty());
+
+		// With our own revive spent, we are not the one to warn.
+		Event(s, 70000, ArcDps::CBTS_ANIMATIONSTART, 1, 1, IOL);
+		Event(s, 71300, ArcDps::CBTS_ANIMATIONSTOP, 1, 1, IOL, FULL, 1300);
+		CHECK(!s.GetView(72000).SelfCanRevive);
+	}
+
+	// The first Illusion of Life of a session comes without its effect's apply. Until one has been seen, a completed
+	// cast and an ally getting up at that very instant stand in for it; after that only the apply counts.
+	void TestIllusionWithoutItsApply()
+	{
+		Rezz::Session s;
+		s.OnAgentUpdate(Agent(":me.1", 1, 1, 7, true, true), 0);
+		s.OnAgentUpdate(Agent(A, 100, 10, 2, true), 0);
+		s.OnAgentUpdate(Agent(B, 200, 20, 4, true), 0);
+		s.OnAgentUpdate(Agent(C, 300, 30, 6, true), 0);
+
+		Event(s, 1000, ArcDps::CBTS_CHANGEDOWN, 100, 10, 0);
+		Event(s, 3000, ArcDps::CBTS_ANIMATIONSTART, 1, 1, IOL);
+		Event(s, 4300, ArcDps::CBTS_CHANGEUP, 100, 10, 0); // up at the instant the cast completes, reported first
+		Event(s, 4300, ArcDps::CBTS_ANIMATIONSTOP, 1, 1, IOL, FULL, 1300);
+		Rezz::SessionView view = s.GetView(5000);
+		CHECK(view.Illusions.size() == 1 && view.Illusions[0].Account == A);
+		CHECK(view.Illusions[0].EndsInMs == 14300 && view.Illusions[0].OurCast);
+
+		// Getting up a second later is some other revive.
+		Event(s, 5300, ArcDps::CBTS_CHANGEUP, 200, 20, 0);
+		CHECK(s.GetView(5400).Illusions.size() == 1);
+
+		// C's cast completes first and B gets up in the same millisecond, reported after it.
+		Event(s, 8000, ArcDps::CBTS_ANIMATIONSTART, 300, 30, IOL);
+		Event(s, 9300, ArcDps::CBTS_ANIMATIONSTOP, 300, 30, IOL, FULL, 1300);
+		Event(s, 9300, ArcDps::CBTS_CHANGEUP, 200, 20, 0);
+		view = s.GetView(9500);
+		CHECK(view.Illusions.size() == 2);
+		CHECK(view.Illusions[1].Account == B && !view.Illusions[1].OurCast);
+
+		// A real apply arrives: from now on nothing but the apply is trusted.
+		BuffEvent(s, 20000, ArcDps::CBTS_BUFFAPPLY, 300, 30, 100, 10, 15000);
+		Event(s, 40000, ArcDps::CBTS_CHANGEDOWN, 200, 20, 0);
+		Event(s, 50000, ArcDps::CBTS_ANIMATIONSTART, 300, 30, IOL);
+		Event(s, 51300, ArcDps::CBTS_CHANGEUP, 200, 20, 0);
+		Event(s, 51300, ArcDps::CBTS_ANIMATIONSTOP, 300, 30, IOL, FULL, 1300);
+		CHECK(s.GetView(52000).Illusions.empty());
+	}
+
+	void TestRotationResetsOutOfFight()
+	{
+		Rezz::Session s;
+		s.OnAgentUpdate(Agent(A, 100, 7, 2, true), 0);
+		s.OnAgentUpdate(Agent(B, 200, 8, 4, true), 0);
+		s.OnAgentUpdate(Agent(C, 300, 9, 1, true), 0);
+		s.SetOrder({ A, B, C });
+
+		Event(s, 1000, ArcDps::CBTS_SQCOMBATSTART, 100, 7, 0);
+		Event(s, 2000, ArcDps::CBTS_ANIMATIONSTART, 100, 7, BS);
+		Event(s, 4500, ArcDps::CBTS_ANIMATIONSTOP, 100, 7, BS, FULL, 2500); // A spends theirs: B is up
+		CHECK(s.GetView(10000).Turn.UpIndex == 1);
+
+		// A has recharged (120 s) but the fight is still on, so the turn stays with B.
+		CHECK(s.GetView(200000).Turn.UpIndex == 1);
+
+		// A short lull: combat starts again before the reset is due, and nothing changes.
+		Event(s, 210000, ArcDps::CBTS_SQCOMBATEND, 100, 7, 0);
+		s.Tick(212650 + 10000);
+		Event(s, 225000, ArcDps::CBTS_SQCOMBATSTART, 100, 7, 0);
+		s.Tick(227650 + Rezz::Session::kRotationResetMs);
+		CHECK(s.GetView(250000).Turn.UpIndex == 1);
+
+		// The fight is over. Not quite long enough yet...
+		Event(s, 260000, ArcDps::CBTS_SQCOMBATEND, 100, 7, 0);
+		s.Tick(262650 + Rezz::Session::kRotationResetMs - 1000);
+		CHECK(s.GetView(284000).Turn.UpIndex == 1);
+		// ...and now it is: back to the top.
+		s.Tick(262650 + Rezz::Session::kRotationResetMs);
+		CHECK(s.GetView(290000).Turn.UpIndex == 0);
+
+		// Still out of combat: a revive used between fights doesn't move the turn for long either.
+		Event(s, 300000, ArcDps::CBTS_ANIMATIONSTART, 100, 7, BS);
+		Event(s, 302500, ArcDps::CBTS_ANIMATIONSTOP, 100, 7, BS, FULL, 2500);
+		CHECK(s.GetView(305000).Turn.Rows[0].IsLastUser); // A was up, so for a moment the turn moves on
+		s.Tick(305000);
+		CHECK(!s.GetView(306000).Turn.Rows[0].IsLastUser); // and the long break puts it straight back at the top
+	}
+
 	void TestLeavingTheSquadDropsFromTheOrder()
 	{
 		Rezz::Session s;
@@ -1083,6 +1230,9 @@ int main()
 		{ "share round trips every squad", TestShareRoundTripsEverySquad },
 		{ "share keeps everyone when it can", TestShareKeepsEveryoneWhenItCan },
 		{ "removing from the order keeps the turn", TestRemovingFromOrderKeepsTheTurn },
+		{ "rotation resets out of fight", TestRotationResetsOutOfFight },
+		{ "illusion of life countdown", TestIllusionOfLifeCountdown },
+		{ "illusion without its apply", TestIllusionWithoutItsApply },
 		{ "leaving the squad drops from the order", TestLeavingTheSquadDropsFromTheOrder },
 		{ "swapping character drops from the order", TestSwappingCharacterDropsFromTheOrder },
 		{ "share carries precast", TestShareCarriesPrecast },

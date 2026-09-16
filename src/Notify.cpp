@@ -25,10 +25,11 @@ namespace Notify
 		constexpr int   kSampleRate = 44100;
 		constexpr short kChannels   = 1;
 
-		Standing s_Last      = Standing::None;
-		unsigned s_LastMs[3] = {};   // when each standing was last announced
-		Standing s_Flash     = Standing::None;
-		unsigned s_FlashMs   = 0;
+		Standing s_Last       = Standing::None;
+		unsigned s_LastMs[3]  = {};   // when each standing was last announced
+		bool     s_Flashing   = false;
+		ImVec4   s_FlashColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+		unsigned s_FlashMs    = 0;
 
 		// PlaySound reads the buffer while it plays, so the bytes have to outlive the call.
 		std::vector<unsigned char> s_Playing;
@@ -96,6 +97,19 @@ namespace Notify
 			{
 				samples.insert(samples.end(), static_cast<size_t>(aLength * kSampleRate), 0);
 			};
+			// Several partials sounding together and dying away together, for a bell or a plucked string.
+			auto chord = [&](std::initializer_list<std::pair<float, float>> aPartials, float aLength, float aDecay)
+			{
+				int count = static_cast<int>(aLength * kSampleRate);
+				for (int i = 0; i < count; i++)
+				{
+					float t = static_cast<float>(i) / kSampleRate;
+					float value = 0.0f;
+					for (const auto& [frequency, level] : aPartials) { value += std::sin(2.0f * 3.14159265f * frequency * t) * level; }
+					float envelope = std::min(1.0f, t / 0.004f) * std::exp(-aDecay * t);
+					samples.push_back(static_cast<short>(std::clamp(value * envelope * aGain, -1.0f, 1.0f) * 32000.0f));
+				}
+			};
 
 			switch (aSound)
 			{
@@ -104,6 +118,21 @@ namespace Notify
 				case Sound::RisingBlip: tone(600.0f, 1500.0f, 0.18f, 0.55f); break;
 				case Sound::LowThud:    tone(150.0f, 90.0f, 0.26f, 0.85f, 0.002f); break;
 				case Sound::Tick:       tone(2200.0f, 1800.0f, 0.02f, 0.5f, 0.001f); break;
+				// 35% below the levels it was written with: it rings longer and higher than the rest, and measured with
+				// hearing's frequency weighting it came out 4.5 dB above the others' median. Turned down 20% first,
+				// then another 15% after listening to it in game.
+				case Sound::Bell:       chord({ { 880.0f, 0.2925f }, { 1760.0f, 0.13f }, { 2640.0f, 0.065f }, { 3520.0f, 0.0325f } }, 0.9f, 5.0f); break;
+				case Sound::TripleBeep:
+					for (int beep = 0; beep < 3; beep++) { tone(1200.0f, 1200.0f, 0.06f, 0.55f); silence(0.04f); }
+					break;
+				case Sound::FallingBlip: tone(1500.0f, 600.0f, 0.18f, 0.55f); break;
+				case Sound::TwoTone:
+					for (int round = 0; round < 2; round++) { tone(950.0f, 950.0f, 0.12f, 0.5f); tone(700.0f, 700.0f, 0.12f, 0.5f); }
+					break;
+				case Sound::Pluck:      chord({ { 440.0f, 0.60f }, { 880.0f, 0.25f }, { 1320.0f, 0.10f } }, 0.35f, 12.0f); break;
+				case Sound::Pulse:
+					for (int beat = 0; beat < 3; beat++) { tone(520.0f, 520.0f, 0.09f, 0.7f); silence(0.06f); }
+					break;
 				default: break;
 			}
 			return samples;
@@ -139,8 +168,22 @@ namespace Notify
 			case Sound::LowThud:    return "low thud";
 			case Sound::Tick:       return "tick";
 			case Sound::File:       return "file...";
+			case Sound::Bell:        return "bell";
+			case Sound::TripleBeep:  return "triple beep";
+			case Sound::FallingBlip: return "falling blip";
+			case Sound::TwoTone:     return "two-tone alarm";
+			case Sound::Pluck:       return "pluck";
+			case Sound::Pulse:       return "low pulse";
 			default:                return "?";
 		}
+	}
+
+	const std::vector<Sound>& MenuOrder()
+	{
+		static const std::vector<Sound> kOrder = { Sound::None, Sound::SoftChime, Sound::Bell, Sound::Pluck, Sound::DoubleBeep,
+			Sound::TripleBeep, Sound::RisingBlip, Sound::FallingBlip, Sound::TwoTone, Sound::LowThud, Sound::Pulse, Sound::Tick,
+			Sound::File };
+		return kOrder;
 	}
 
 	void Init() {}
@@ -148,7 +191,7 @@ namespace Notify
 	void Reset()
 	{
 		s_Last = Standing::None;
-		s_Flash = Standing::None;
+		s_Flashing = false;
 		s_FlashMs = 0;
 		s_LastMs[0] = s_LastMs[1] = s_LastMs[2] = 0;
 	}
@@ -183,7 +226,25 @@ namespace Notify
 		PlaySoundA(reinterpret_cast<const char*>(s_Playing.data()), nullptr, SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
 	}
 
-	std::string OnStanding(Standing aStanding, unsigned aNowMs, bool aInWvw, bool aGameplay)
+	void Alert(Sound aSound, const float aColor[3], bool aFlash, unsigned aNowMs)
+	{
+		Play(aSound);
+		if (!aFlash) { return; }
+		s_Flashing = true;
+		s_FlashColor = ImVec4(aColor[0], aColor[1], aColor[2], 1.0f);
+		s_FlashMs = aNowMs;
+	}
+
+	void Preview(Standing aStanding, unsigned aNowMs)
+	{
+		if (aStanding == Standing::None) { return; }
+		Play(SoundFor(aStanding));
+		s_Flashing = true;
+		s_FlashColor = FlashColor(aStanding);
+		s_FlashMs = aNowMs;
+	}
+
+	std::string OnStanding(Standing aStanding, unsigned aNowMs, bool aInWvw, bool aGameplay, bool aUnguarded)
 	{
 		if (!aGameplay || !aInWvw)
 		{
@@ -197,13 +258,14 @@ namespace Notify
 		if (aStanding == Standing::None) { return {}; }
 
 		unsigned& last = s_LastMs[static_cast<int>(aStanding)];
-		if (last != 0 && aNowMs - last < kRepeatGuardMs) { return {}; } // the turn bounced; say it once
+		if (!aUnguarded && last != 0 && aNowMs - last < kRepeatGuardMs) { return {}; } // the turn bounced; say it once
 		last = aNowMs;
 
 		Play(SoundFor(aStanding));
 		if (FlashEnabled(aStanding))
 		{
-			s_Flash = aStanding;
+			s_Flashing = true;
+			s_FlashColor = FlashColor(aStanding);
 			s_FlashMs = aNowMs;
 		}
 		if (aStanding == Standing::Up && Settings::Current.UpBanner) { return "You're up"; }
@@ -213,9 +275,9 @@ namespace Notify
 
 	void Render(unsigned aNowMs, bool aGameplay)
 	{
-		if (s_Flash == Standing::None) { return; }
+		if (!s_Flashing) { return; }
 		unsigned age = aNowMs - s_FlashMs;
-		if (!aGameplay || age > kFlashInMs + kFlashOutMs) { s_Flash = Standing::None; return; }
+		if (!aGameplay || age > kFlashInMs + kFlashOutMs) { s_Flashing = false; return; }
 
 		// One pulse: quick in, slower out.
 		float strength = age < kFlashInMs
@@ -224,7 +286,7 @@ namespace Notify
 		strength = std::clamp(strength, 0.0f, 1.0f) * std::clamp(Settings::Current.FlashStrength, 0.0f, 1.0f);
 		if (strength <= 0.001f) { return; }
 
-		ImVec4 color = FlashColor(s_Flash);
+		ImVec4 color = s_FlashColor;
 		ImU32 edge = ImGui::GetColorU32(ImVec4(color.x, color.y, color.z, strength));
 		ImU32 clear = ImGui::GetColorU32(ImVec4(color.x, color.y, color.z, 0.0f));
 

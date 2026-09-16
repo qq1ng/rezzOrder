@@ -41,6 +41,8 @@ namespace Rezz::Fake
 		Squad& Downed(const std::string& aAccount, uint64_t aMsAgo = 0);
 		Squad& Alive(const std::string& aAccount, uint64_t aMsAgo = 0);
 		Squad& Dead(const std::string& aAccount, uint64_t aMsAgo = 0);
+		// Illusion of Life put on them: 15 s from then.
+		Squad& Illusion(const std::string& aAccount, uint64_t aMsAgo = 0);
 		// Any event from them, so they don't look out of range.
 		Squad& Seen(const std::string& aAccount, uint64_t aMsAgo = 0);
 		// They left our map.

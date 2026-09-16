@@ -18,4 +18,9 @@ namespace Fonts
 	// font size. aBig selects the banner font. Pair with Pop().
 	void Push(float aScale, bool aBig = false);
 	void Pop();
+
+	// Banners on the screen. They get a font of their own, built at the largest size any banner uses so the
+	// biggest text is sharp; smaller banner text is the same font drawn smaller.
+	float   BannerBasePixels(); // what the banner size settings multiply
+	ImFont* BannerFont();
 }

@@ -42,6 +42,8 @@ instant revive are listed unless you tick *all professions*.
 ### Read the turn window
 
 - `UP` is whose turn it is. `BK` is the backup, meaning the next person ready after them.
+- During a fight the turn works down the list: someone whose rez comes back waits until the list gets back
+  to them. Once the squad has been out of combat for 20 seconds, the resets.
 - Bright green means **you**. A quieter green means somebody else is up.
 - A recharging player shows their CD timer in red, with a bar filling up.
 - A downed or dead player fades to grey, they are skipped.
@@ -51,18 +53,22 @@ instant revive are listed unless you tick *all professions*.
 - A `*` after a name marks a precast player. See below.
 
 Leaving the squad or swapping to another character takes that player out of the order by itself, and
-everybody still in it keeps their turn. Moving to another map does not: they show as `away` until they are
-back, because they usually are.
+everybody still in it keeps their turn. Moving to another map does not: they show as `away` and are skipped
+until they are back.
 
 ### Customizable
 
 Right-click the window and pick **style**:
 
 - Five layouts: a compact list, big bars, a focus card, a horizontal strip for a screen edge, or next up
-- **Next up** always shows the player who is up at the top, the backup directly under it, and as many of the following
-  players as *max displayed* allows.
+- **Next up** always shows the player who is up at the top, the backup directly under it, and as many of the
+  following players as *max displayed* allows.
 - Cooldown as a bar, in seconds, or both.
 - Drag the **corner grip** to size the whole window. Drag the window itself to move it.
+- The window keeps one size whoever is up and whatever the names are, so it can sit packed in beside other
+  windows. With no order it keeps the size it last had with one. *max name length* sets how much room a name gets; a longer one is cut.
+- *messages* puts short-lived messages, like somebody leaving the squad, in a strip below or above the window,
+  or hides them. Pick the side that has room.
 - **Ctrl+Shift+L** locks it: it stops moving and clicks pass through to the game. Hold **Ctrl+Shift** to
   edit it anyway.
 
@@ -78,10 +84,18 @@ layout and tune the sound and flash.
 In the Nexus options page, under *When the turn reaches you*, each of these can be set for "your turn" and
 for "backup" separately:
 
-- a **banner text** across the top of the screen,
-- a **sound**, six to choose from with a play button on each, or your own WAV file,
+- a **banner** on screen: its style, size, place and colour can be set, separately for alerts (your turn,
+  backup, Illusion of Life) and for other messages, so either can be kept clear of the target's name at the top,
+- a **sound**, twelve to choose from with a play button on each, or your own WAV file,
 - a **flash** along the edges of the screen, in a colour you pick.
 
+
+### Illusion of Life countdown
+
+A player revived by Illusion of Life goes down again after 15 seconds unless they kill something. The mesmer who
+cast it, and everyone whose own revive skill is ready, gets a countdown of their last seconds (5 by default): the seconds in large figures and
+their names, with a sound and a pink flash along the screen edges when it starts. It stops the moment they rally.
+Nexus options, under *Illusion of Life*.
 
 ### Share the order with the squad
 
