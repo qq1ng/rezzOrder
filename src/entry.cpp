@@ -29,7 +29,7 @@
 #include <mmsystem.h>
 
 #define ADDON_NAME "Rezz Order"
-#define ADDON_VERSION_STRING "0.3.0"
+#define ADDON_VERSION_STRING "0.4.0"
 
 namespace
 {
@@ -221,7 +221,8 @@ namespace
 		switch (aKind)
 		{
 			case Rezz::NoticeKind::LeftSquad:
-			case Rezz::NoticeKind::LeftMap:           return s.BannerOnLeave;
+			case Rezz::NoticeKind::LeftMap:
+			case Rezz::NoticeKind::Substituted:       return s.BannerOnLeave;
 			case Rezz::NoticeKind::ChangedProfession: return s.BannerOnSwap;
 			case Rezz::NoticeKind::ShareApplied:
 			case Rezz::NoticeKind::ShareOffered:      return s.BannerOnShare;

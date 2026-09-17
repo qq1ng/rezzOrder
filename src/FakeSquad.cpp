@@ -57,7 +57,8 @@ namespace Rezz::Fake
 	Squad& Squad::Add(const std::string& aAccount, const std::string& aCharacter, uint32_t aProfession, uint32_t aElite,
 		bool aSelf)
 	{
-		Known known{ m_NextId++, m_NextInstance++, aProfession, aElite };
+		// Three players to a subgroup, handed out in turn, so the squad isn't sorted by subgroup already.
+		Known known{ m_NextId++, m_NextInstance++, aProfession, aElite, static_cast<uint16_t>(m_Known.size() % 3 + 1) };
 		m_Known[aAccount] = known;
 
 		ArcDps::EvAgentUpdate update{};
@@ -71,13 +72,13 @@ namespace Rezz::Fake
 		update.Self = aSelf ? 1 : 0;
 		// Joined long enough ago that nobody counts as "just seen", which would make every state a guess.
 		m_Session.OnAgentUpdate(update, At(300000));
-		m_Session.OnRole(aAccount, SquadRole::Member, 1, At(300000));
+		m_Session.OnRole(aAccount, SquadRole::Member, known.Subgroup, At(300000));
 		return *this;
 	}
 
 	Squad& Squad::Role(const std::string& aAccount, SquadRole aRole)
 	{
-		m_Session.OnRole(aAccount, aRole, 1, m_NowMs);
+		m_Session.OnRole(aAccount, aRole, Find(aAccount).Subgroup, m_NowMs);
 		return *this;
 	}
 

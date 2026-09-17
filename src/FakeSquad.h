@@ -67,6 +67,7 @@ namespace Rezz::Fake
 			uint16_t Instance;
 			uint32_t Profession;
 			uint32_t Elite;
+			uint16_t Subgroup;
 		};
 
 		const Known& Find(const std::string& aAccount) const;

@@ -50,6 +50,12 @@ namespace Rezz
 		return true;
 	}
 
+	void Tracker::InsertIntoOrder(size_t aIndex, const std::string& aAccount)
+	{
+		if (std::find(m_Order.begin(), m_Order.end(), aAccount) != m_Order.end()) { return; }
+		m_Order.insert(m_Order.begin() + static_cast<std::ptrdiff_t>(std::min(aIndex, m_Order.size())), aAccount);
+	}
+
 	PlayerStatus& Tracker::GetPlayer(const std::string& aAccount)
 	{
 		PlayerStatus& player = m_Players[aAccount];

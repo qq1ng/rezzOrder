@@ -25,6 +25,7 @@ namespace Settings
 		// Players who may spend their revive before their turn, when they see a fight going badly. They are
 		// in the order like anyone else; the window and the shared line just say so.
 		std::vector<std::string> Precast;
+		int Bench = 0;                          // bench subgroup for bench swaps, 255 the last, 0 none (shared with the order)
 		std::map<std::string, std::string> Nicknames; // account name -> name to show instead
 		// Named orders, for squads that run together often. Saved as preset=<name>=<account>><account>...
 		std::map<std::string, std::vector<std::string>> Presets;
@@ -52,6 +53,7 @@ namespace Settings
 		bool  PreferAccount   = false;          // always account names, even when the character name is usable
 		bool  ShareFromLeaders = true;          // take over an order shared by the commander or a lieutenant
 		bool  ShareFromAnyone  = false;         // ... or by anyone in the squad, without asking
+		bool  Substitutes      = true;          // a player moved into a benched player's subgroup takes their place
 		// Who is asked to answer "!rezz?": 0 nobody, 1 only when the order is ours (default), 2 always.
 		int   AnswerRequests   = 1;
 

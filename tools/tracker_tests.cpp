@@ -611,6 +611,359 @@ namespace
 		CHECK(view.Precast.empty()); // they were a precast player, and that goes with them
 	}
 
+	// Three fighting subgroups (1-3), subgroup 5 the bench with a druid waiting. Order: X, D1, D2, us.
+	constexpr uint32_t RANGER = 4, WARRIOR = 2, ENGINEER = 3, MESMER = 7, NECRO = 8;
+	constexpr uint32_t DRUID_SPEC = 5, TROUBADOUR_SPEC = 73;
+	const std::string X = ":x.1", D1 = ":druid1.1", D2 = ":druid2.2", BENCH = ":bench.3", ME = ":me.1";
+
+	ArcDps::EvAgentUpdate Spec(const std::string& aAccount, uint64_t aId, uint32_t aProfession, uint32_t aElite)
+	{
+		ArcDps::EvAgentUpdate update = Agent(aAccount, aId, static_cast<uint16_t>(aId), aProfession, true);
+		update.Elite = aElite;
+		return update;
+	}
+
+	Rezz::Session BenchSquad()
+	{
+		Rezz::Session s;
+		s.OnAgentUpdate(Agent(ME, 1, 1, 7, true, true), 0);
+		s.OnAgentUpdate(Agent(X, 10, 10, WARRIOR, true), 0);
+		s.OnAgentUpdate(Spec(D1, 20, RANGER, DRUID_SPEC), 0);
+		s.OnAgentUpdate(Spec(D2, 30, RANGER, DRUID_SPEC), 0);
+		s.OnAgentUpdate(Spec(BENCH, 40, RANGER, DRUID_SPEC), 0);
+		s.OnRole(ME, Rezz::SquadRole::Member, 3, 0);
+		s.OnRole(X, Rezz::SquadRole::Member, 1, 0);
+		s.OnRole(D1, Rezz::SquadRole::Member, 1, 0);
+		s.OnRole(D2, Rezz::SquadRole::Member, 2, 0);
+		s.OnRole(BENCH, Rezz::SquadRole::Member, 5, 0);
+		s.SetOrder({ X, D1, D2, ME });
+		s.SetPrecast({ D1 });
+		s.SetBench(5);
+		s.Tick(200000); // everything above is long past the pairing window
+		s.TakeNotices();
+		return s;
+	}
+
+	void TestBenchSwapTakesThePlace()
+	{
+		Rezz::Session s = BenchSquad();
+		s.OnRole(D1, Rezz::SquadRole::Member, 5, 300000); // benched: out at once, the place stays open
+		CHECK(s.Order() == std::vector<std::string>({ X, D2, ME }));
+		CHECK(CountNotices(s.TakeNotices(), Rezz::NoticeKind::Substituted) == 1);
+		s.OnRole(BENCH, Rezz::SquadRole::Member, 1, 303000); // the bench druid into D1's subgroup
+		CHECK(s.Order() == std::vector<std::string>({ X, BENCH, D2, ME }));
+		CHECK(s.Precast() == std::vector<std::string>({ BENCH })); // the mark belongs to the place
+		std::vector<Rezz::Notice> notices = s.TakeNotices();
+		CHECK(notices.size() == 1 && notices[0].Kind == Rezz::NoticeKind::Substituted && notices[0].Account == BENCH);
+		CHECK(!notices.empty() && notices[0].Text.find("2. bench took the place of druid1") != std::string::npos);
+
+		// Two rounds later D1 comes back for the other druid, moving in before D2 has gone. The bench is empty
+		// by then and no longer the last subgroup in use, but it is still the bench.
+		s.OnRole(D1, Rezz::SquadRole::Member, 2, 600000);
+		CHECK(s.Order() == std::vector<std::string>({ X, BENCH, D2, ME }));
+		s.OnRole(D2, Rezz::SquadRole::Member, 5, 601000);
+		CHECK(s.Order() == std::vector<std::string>({ X, BENCH, D1, ME }));
+	}
+
+	void TestBenchSwapKeepsTheTurn()
+	{
+		Rezz::Session s = BenchSquad();
+		// X spent their skill, so D1 is up.
+		Event(s, 250000, ArcDps::CBTS_ANIMATIONSTART, 10, 10, BS);
+		Event(s, 252000, ArcDps::CBTS_ANIMATIONSTOP, 10, 10, BS, FULL, 2000);
+		CHECK(s.GetView(253000).Turn.UpIndex == 1);
+		s.OnRole(D1, Rezz::SquadRole::Member, 5, 254000);
+		s.OnRole(BENCH, Rezz::SquadRole::Member, 1, 255000);
+		Rezz::SessionView view = s.GetView(256000);
+		CHECK(view.Turn.UpIndex == 1 && view.Turn.Rows[1].Account == BENCH);
+	}
+
+	void TestReshuffleIsNotASwap()
+	{
+		// Building a new group: D1 into an empty subgroup that is neither the first nor the last in use.
+		Rezz::Session s = BenchSquad();
+		s.OnRole(D1, Rezz::SquadRole::Member, 4, 300000);
+		s.OnRole(BENCH, Rezz::SquadRole::Member, 1, 301000);
+		CHECK(s.Order() == std::vector<std::string>({ X, D1, D2, ME }));
+
+		// Into a fighting subgroup with somebody from the order in it.
+		Rezz::Session t = BenchSquad();
+		t.OnRole(D1, Rezz::SquadRole::Member, 2, 300000);
+		CHECK(t.Order() == std::vector<std::string>({ X, D1, D2, ME }));
+
+		// Subgroup 1 as a full fighting group with nobody from the order in it: still not the bench, and moving
+		// a player from the order there is just a reshuffle.
+		Rezz::Session g = BenchSquad();
+		const std::string DPS = ":dps.8";
+		g.OnAgentUpdate(Agent(DPS, 80, 80, ENGINEER, true), 0);
+		g.OnRole(DPS, Rezz::SquadRole::Member, 1, 0);
+		g.OnRole(X, Rezz::SquadRole::Member, 4, 0);
+		g.OnRole(D1, Rezz::SquadRole::Member, 4, 0);
+		g.Tick(250000);
+		g.OnRole(D1, Rezz::SquadRole::Member, 1, 300000);
+		CHECK(g.Order() == std::vector<std::string>({ X, D1, D2, ME }));
+
+		// Without a bench set nobody is benched.
+		Rezz::Session n = BenchSquad();
+		n.SetBench(0);
+		n.OnRole(D1, Rezz::SquadRole::Member, 5, 300000);
+		CHECK(n.Order() == std::vector<std::string>({ X, D1, D2, ME }));
+
+		// Somebody without a sure revive skill moving in is no substitute: an engineer, or a warrior nobody has
+		// seen use Battle Standard.
+		Rezz::Session u = BenchSquad();
+		const std::string ENGI = ":engi.9", WAR = ":war.7";
+		u.OnAgentUpdate(Agent(ENGI, 50, 50, ENGINEER, true), 0);
+		u.OnAgentUpdate(Agent(WAR, 60, 60, WARRIOR, true), 0);
+		u.OnRole(ENGI, Rezz::SquadRole::Member, 5, 0);
+		u.OnRole(WAR, Rezz::SquadRole::Member, 5, 0);
+		u.Tick(250000);
+		u.OnRole(D1, Rezz::SquadRole::Member, 5, 300000);
+		u.OnRole(ENGI, Rezz::SquadRole::Member, 1, 301000);
+		u.OnRole(WAR, Rezz::SquadRole::Member, 1, 302000);
+		CHECK(u.Order() == std::vector<std::string>({ X, D2, ME }));
+		// ... until that warrior's Battle Standard is seen.
+		Event(u, 303000, ArcDps::CBTS_ANIMATIONSTART, 60, 60, BS);
+		Event(u, 305000, ArcDps::CBTS_ANIMATIONSTOP, 60, 60, BS, FULL, 2000);
+		u.Tick(306000);
+		CHECK(u.Order() == std::vector<std::string>({ X, WAR, D2, ME }));
+
+		// Moves further apart than the window are unrelated.
+		Rezz::Session v = BenchSquad();
+		v.OnRole(D1, Rezz::SquadRole::Member, 5, 300000);
+		v.Tick(300000 + Rezz::Session::kSubstituteWindowMs + 1000);
+		v.OnRole(BENCH, Rezz::SquadRole::Member, 1, 300000 + Rezz::Session::kSubstituteWindowMs + 2000);
+		CHECK(v.Order() == std::vector<std::string>({ X, D2, ME }));
+
+		// Unofficial Extras reports subgroup 0 for a moment while somebody loads: not a move.
+		Rezz::Session w = BenchSquad();
+		w.OnRole(D1, Rezz::SquadRole::Member, 0, 300000);
+		w.OnRole(D1, Rezz::SquadRole::Member, 1, 301000);
+		CHECK(w.Order() == std::vector<std::string>({ X, D1, D2, ME }));
+	}
+
+	void TestBenchIsTheLastSubgroup()
+	{
+		// "last": the same swaps work while the bench is subgroup 5...
+		Rezz::Session s = BenchSquad();
+		s.SetBench(Rezz::Share::kBenchLast);
+		s.OnRole(D1, Rezz::SquadRole::Member, 5, 300000);
+		s.OnRole(BENCH, Rezz::SquadRole::Member, 1, 301000);
+		CHECK(s.Order() == std::vector<std::string>({ X, BENCH, D2, ME }));
+		// ... including the next round, into the bench that the last swap emptied.
+		s.OnRole(D1, Rezz::SquadRole::Member, 2, 600000);
+		s.OnRole(D2, Rezz::SquadRole::Member, 5, 601000);
+		CHECK(s.Order() == std::vector<std::string>({ X, BENCH, D1, ME }));
+
+		// The squad fills up: the bench moves on to 6 and subgroup 5 becomes a fighting group.
+		Rezz::Session t = BenchSquad();
+		t.SetBench(Rezz::Share::kBenchLast);
+		const std::string DPS = ":dps.8";
+		t.OnAgentUpdate(Agent(DPS, 80, 80, ENGINEER, true), 250000);
+		t.OnRole(DPS, Rezz::SquadRole::Member, 5, 250000);
+		t.OnRole(BENCH, Rezz::SquadRole::Member, 6, 251000);
+		t.OnRole(D1, Rezz::SquadRole::Member, 5, 300000); // into the new fighting group: a reshuffle
+		CHECK(t.Order() == std::vector<std::string>({ X, D1, D2, ME }));
+		t.OnRole(D2, Rezz::SquadRole::Member, 6, 301000); // into the bench now last
+		CHECK(t.Order() == std::vector<std::string>({ X, D1, ME }));
+
+		// Building a new group past the last one isn't benching.
+		Rezz::Session u = BenchSquad();
+		u.SetBench(Rezz::Share::kBenchLast);
+		u.OnRole(D1, Rezz::SquadRole::Member, 7, 300000);
+		CHECK(u.Order() == std::vector<std::string>({ X, D1, D2, ME }));
+
+		// No bench tonight: the last subgroup is a fighting group with a player from the order alone in it.
+		Rezz::Session v = BenchSquad();
+		v.SetBench(Rezz::Share::kBenchLast);
+		v.OnRole(BENCH, Rezz::SquadRole::Member, 2, 250000);
+		v.OnRole(X, Rezz::SquadRole::Member, 4, 251000);
+		v.Tick(500000);
+		v.OnRole(D1, Rezz::SquadRole::Member, 4, 600000);
+		CHECK(v.Order() == std::vector<std::string>({ X, D1, D2, ME }));
+		// ... and that player moving down out of it isn't benched either.
+		v.OnRole(X, Rezz::SquadRole::Member, 3, 601000);
+		CHECK(v.Order() == std::vector<std::string>({ X, D1, D2, ME }));
+	}
+
+	void TestMisdragIsUndone()
+	{
+		// Benched by mistake and dragged straight back: same place, same mark, nobody else involved.
+		Rezz::Session s = BenchSquad();
+		s.OnRole(D1, Rezz::SquadRole::Member, 5, 300000);
+		s.OnRole(D1, Rezz::SquadRole::Member, 1, 302000);
+		CHECK(s.Order() == std::vector<std::string>({ X, D1, D2, ME }));
+		CHECK(s.Precast() == std::vector<std::string>({ D1 }));
+
+		// The whole swap undone: BENCH back to the bench, D1 back in.
+		Rezz::Session t = BenchSquad();
+		t.OnRole(D1, Rezz::SquadRole::Member, 5, 300000);
+		t.OnRole(BENCH, Rezz::SquadRole::Member, 1, 301000);
+		t.OnRole(BENCH, Rezz::SquadRole::Member, 5, 305000);
+		t.OnRole(D1, Rezz::SquadRole::Member, 1, 306000);
+		CHECK(t.Order() == std::vector<std::string>({ X, D1, D2, ME }));
+	}
+
+	void TestJoiningIsNotMovingIn()
+	{
+		// Our client starts (or reloads) just before a swap: Extras lists everyone with their subgroup for the
+		// first time. The druid already standing in subgroup 1 did not move in and must not take D1's place,
+		// or this client alone would show a different order.
+		Rezz::Session s;
+		const std::string PUG = ":pug.5", OTHER = ":other.6";
+		s.OnAgentUpdate(Agent(ME, 1, 1, 7, true, true), 0);
+		s.OnAgentUpdate(Spec(D1, 20, RANGER, DRUID_SPEC), 0);
+		s.OnAgentUpdate(Spec(PUG, 60, RANGER, DRUID_SPEC), 0);
+		s.OnAgentUpdate(Agent(OTHER, 70, 70, ENGINEER, true), 0);
+		s.SetOrder({ D1, ME });
+		s.SetBench(5);
+		s.OnRole(ME, Rezz::SquadRole::Member, 3, 1000);
+		s.OnRole(D1, Rezz::SquadRole::Member, 1, 1000);
+		s.OnRole(PUG, Rezz::SquadRole::Member, 1, 1000);
+		s.OnRole(OTHER, Rezz::SquadRole::Member, 5, 1000);
+		s.OnRole(D1, Rezz::SquadRole::Member, 5, 5000);
+		CHECK(s.Order() == std::vector<std::string>({ ME }));
+
+		// Somebody joining the squad straight into the benched player's subgroup isn't the substitute either.
+		Rezz::Session t = BenchSquad();
+		t.OnRole(D1, Rezz::SquadRole::Member, 5, 300000);
+		t.OnAgentUpdate(Spec(PUG, 60, RANGER, DRUID_SPEC), 300500);
+		t.OnRole(PUG, Rezz::SquadRole::Member, 1, 301000);
+		CHECK(t.Order() == std::vector<std::string>({ X, D2, ME }));
+		t.OnRole(BENCH, Rezz::SquadRole::Member, 1, 302000); // the real one still gets it
+		CHECK(t.Order() == std::vector<std::string>({ X, BENCH, D2, ME }));
+	}
+
+	void TestRejoiningGetsThePlaceBack()
+	{
+		Rezz::Session s = BenchSquad();
+		s.OnRole(D1, Rezz::SquadRole::None, 0, 300000);
+		CHECK(s.Order() == std::vector<std::string>({ X, D2, ME }));
+		s.OnRole(D1, Rezz::SquadRole::Member, 1, 330000);
+		CHECK(s.Order() == std::vector<std::string>({ X, D1, D2, ME }));
+		CHECK(s.Precast() == std::vector<std::string>({ D1 }));
+
+		// Later than the window it's a new player to add by hand.
+		Rezz::Session t = BenchSquad();
+		t.OnRole(D1, Rezz::SquadRole::None, 0, 300000);
+		t.OnRole(D1, Rezz::SquadRole::Member, 1, 300000 + Rezz::Session::kSubstituteWindowMs + 1000);
+		CHECK(t.Order() == std::vector<std::string>({ X, D2, ME }));
+	}
+
+	void TestLeaverIsReplacedInTheirPlace()
+	{
+		Rezz::Session s = BenchSquad();
+		s.OnRole(D1, Rezz::SquadRole::None, 0, 300000);
+		CHECK(s.Order() == std::vector<std::string>({ X, D2, ME }));
+		s.TakeNotices();
+		s.OnRole(BENCH, Rezz::SquadRole::Member, 1, 310000);
+		CHECK(s.Order() == std::vector<std::string>({ X, BENCH, D2, ME }));
+		CHECK(s.Precast() == std::vector<std::string>({ BENCH }));
+		CHECK(CountNotices(s.TakeNotices(), Rezz::NoticeKind::Substituted) == 1);
+	}
+
+	void TestNeighboursComeBackInOrder()
+	{
+		// D1 and D2 are next to each other in the order and both benched. Whichever order they went out in and
+		// their substitutes came in, each substitute ends up in the right place.
+		const std::string BENCH2 = ":bench2.4";
+		for (int wentOut = 0; wentOut < 2; wentOut++)
+		{
+			for (int cameIn = 0; cameIn < 2; cameIn++)
+			{
+				Rezz::Session s = BenchSquad();
+				s.OnAgentUpdate(Spec(BENCH2, 70, RANGER, DRUID_SPEC), 0);
+				s.OnRole(BENCH2, Rezz::SquadRole::Member, 5, 0);
+				s.Tick(250000);
+				const std::string& firstOut = wentOut ? D2 : D1;
+				const std::string& secondOut = wentOut ? D1 : D2;
+				s.OnRole(firstOut, Rezz::SquadRole::Member, 5, 300000);
+				s.OnRole(secondOut, Rezz::SquadRole::Member, 5, 301000);
+				CHECK(s.Order() == std::vector<std::string>({ X, ME }));
+				if (cameIn)
+				{
+					s.OnRole(BENCH2, Rezz::SquadRole::Member, 2, 302000);
+					s.OnRole(BENCH, Rezz::SquadRole::Member, 1, 303000);
+				}
+				else
+				{
+					s.OnRole(BENCH, Rezz::SquadRole::Member, 1, 302000);
+					s.OnRole(BENCH2, Rezz::SquadRole::Member, 2, 303000);
+				}
+				CHECK(s.Order() == std::vector<std::string>({ X, BENCH, BENCH2, ME }));
+			}
+		}
+	}
+
+	void TestCharacterSwapsAroundASwap()
+	{
+		// A druid in the order swapping to a troubadour keeps their place.
+		Rezz::Session s = BenchSquad();
+		s.OnAgentUpdate(Spec(D1, 21, MESMER, TROUBADOUR_SPEC), 300000);
+		CHECK(s.Order() == std::vector<std::string>({ X, D1, D2, ME }));
+
+		// Swapping to an engineer takes them out, and a substitute moving in takes the place...
+		Rezz::Session t = BenchSquad();
+		t.OnAgentUpdate(Agent(D1, 21, 21, ENGINEER, true), 300000);
+		CHECK(t.Order() == std::vector<std::string>({ X, D2, ME }));
+		t.OnRole(BENCH, Rezz::SquadRole::Member, 1, 305000);
+		CHECK(t.Order() == std::vector<std::string>({ X, BENCH, D2, ME }));
+
+		// ... or they swap back and have it again.
+		Rezz::Session u = BenchSquad();
+		u.OnAgentUpdate(Agent(D1, 21, 21, ENGINEER, true), 300000);
+		u.OnAgentUpdate(Spec(D1, 22, RANGER, DRUID_SPEC), 340000);
+		CHECK(u.Order() == std::vector<std::string>({ X, D1, D2, ME }));
+
+		// The substitute is moved in while still on a reaper, and only then swaps to their druid.
+		Rezz::Session v = BenchSquad();
+		v.OnAgentUpdate(Agent(BENCH, 41, 41, NECRO, true), 250000);
+		v.OnRole(D1, Rezz::SquadRole::Member, 5, 300000);
+		v.OnRole(BENCH, Rezz::SquadRole::Member, 1, 301000);
+		CHECK(v.Order() == std::vector<std::string>({ X, D2, ME }));
+		v.OnAgentUpdate(Spec(BENCH, 42, RANGER, DRUID_SPEC), 350000);
+		CHECK(v.Order() == std::vector<std::string>({ X, BENCH, D2, ME }));
+
+		// arcdps reports profession 0 and elite 0 while a player loads: that is no swap and no lost druid.
+		Rezz::Session w = BenchSquad();
+		w.OnAgentUpdate(Agent(D1, 23, 23, 0, true), 300000);
+		CHECK(w.Order() == std::vector<std::string>({ X, D1, D2, ME }));
+	}
+
+	void TestSeveralSwapsInOneSubgroup()
+	{
+		// A druid and a troubadour from subgroup 1 go out, a troubadour and a druid come in: matched by profession.
+		Rezz::Session s = BenchSquad();
+		const std::string TROUB = ":troub.7";
+		s.OnAgentUpdate(Spec(X, 11, MESMER, TROUBADOUR_SPEC), 0);
+		s.OnAgentUpdate(Spec(TROUB, 60, MESMER, TROUBADOUR_SPEC), 0);
+		s.OnRole(TROUB, Rezz::SquadRole::Member, 5, 0);
+		s.Tick(250000);
+		s.OnRole(X, Rezz::SquadRole::Member, 5, 300000);
+		s.OnRole(D1, Rezz::SquadRole::Member, 5, 300100);
+		s.OnRole(BENCH, Rezz::SquadRole::Member, 1, 300200);
+		CHECK(s.Order() == std::vector<std::string>({ BENCH, D2, ME })); // only a druid's place fits a druid
+		s.OnRole(TROUB, Rezz::SquadRole::Member, 1, 300300);
+		CHECK(s.Order() == std::vector<std::string>({ TROUB, BENCH, D2, ME }));
+
+		// Two druids for two druid places can't be told apart: say so, and leave it to the players.
+		Rezz::Session t = BenchSquad();
+		const std::string BENCH2 = ":bench2.4";
+		t.OnAgentUpdate(Spec(BENCH2, 70, RANGER, DRUID_SPEC), 0);
+		t.OnRole(BENCH2, Rezz::SquadRole::Member, 5, 0);
+		t.OnRole(D2, Rezz::SquadRole::Member, 1, 0);
+		t.Tick(250000);
+		t.TakeNotices();
+		t.OnRole(D1, Rezz::SquadRole::Member, 5, 300000);
+		t.OnRole(D2, Rezz::SquadRole::Member, 5, 300100);
+		t.OnRole(BENCH, Rezz::SquadRole::Member, 1, 300200);
+		t.OnRole(BENCH2, Rezz::SquadRole::Member, 1, 300300);
+		CHECK(t.Order() == std::vector<std::string>({ X, ME }));
+		size_t cantTell = 0;
+		for (const Rezz::Notice& notice : t.TakeNotices()) { if (notice.Text.find("Can't tell") != std::string::npos) { cantTell++; } }
+		CHECK(cantTell == 1);
+	}
+
 	void TestSwappingCharacterDropsFromTheOrder()
 	{
 		auto named = [](const std::string& aAccount, uint64_t aId, uint16_t aInst, uint32_t aProfession,
@@ -994,6 +1347,45 @@ namespace
 		CHECK(resolved.Unknown.size() == 1 && resolved.Unknown[0] == "Nobody");
 	}
 
+	void TestShareCarriesTheBench()
+	{
+		std::vector<Rezz::RosterMember> roster = { Who(":Gorath.5076", "Gorath"), Who(":murako.9143", "murako") };
+		std::string line = Rezz::Share::Encode({ ":Gorath.5076", ":murako.9143" }, { ":murako.9143" }, roster, 5);
+		CHECK(line == "!rezzorder Gorath > murako* > bench:5");
+		CHECK(Rezz::Share::Encode({ ":Gorath.5076" }, {}, roster, Rezz::Share::kBenchLast) == "!rezzorder Gorath > bench:last");
+		CHECK(Rezz::Share::Parse("!rezzorder Gorath > bench:last").Bench == Rezz::Share::kBenchLast);
+		CHECK(Rezz::Share::Parse("!rezzorder Gorath > Bench: LAST").Bench == Rezz::Share::kBenchLast);
+		CHECK(Rezz::Share::Encode({ ":Gorath.5076" }, {}, roster, 99) == "!rezzorder Gorath");
+		Rezz::Share::Message message = Rezz::Share::Parse(line);
+		CHECK(message.What == Rezz::Share::Kind::Order && message.Entries.size() == 2 && message.Bench == 5);
+		CHECK(Rezz::Share::Encode({ ":Gorath.5076" }, {}, roster) == "!rezzorder Gorath");
+
+		// Typed by hand, or garbage: only 1-15 is a bench, and it's never read as a player.
+		CHECK(Rezz::Share::Parse("!rezzorder Gorath, Bench: 12").Bench == 12);
+		for (const char* bad : { "!rezzorder Gorath > bench:0", "!rezzorder Gorath > bench:16", "!rezzorder Gorath > bench:x",
+			"!rezzorder Gorath > bench:-1", "!rezzorder Gorath > bench:99999999999" })
+		{
+			Rezz::Share::Message parsed = Rezz::Share::Parse(bad);
+			CHECK(parsed.Bench == 0 && parsed.Entries.size() == 1);
+		}
+
+		// A client that doesn't know the token (0.3.0) takes it for a name matching nobody: the players still
+		// come through.
+		std::vector<Rezz::Share::Entry> old = { { "Gorath", false }, { "murako", true }, { "bench:5", false } };
+		Rezz::Share::Resolved resolved = Rezz::Share::Resolve(old, roster);
+		CHECK(resolved.Accounts == std::vector<std::string>({ ":Gorath.5076", ":murako.9143" }));
+
+		// A leader's share sets the bench on everyone's client; one without it clears it.
+		Rezz::Session s;
+		s.OnAgentUpdate(Agent(A, 100, 7, 2, true, true), 0);
+		s.OnAgentUpdate(Agent(B, 200, 8, 4, true), 0);
+		s.OnRole(B, Rezz::SquadRole::Leader, 1, 0);
+		s.OnChatMessage(B, "!rezzorder b > a > bench:6", 1000);
+		CHECK(s.GetView(1500).Bench == 6);
+		s.OnChatMessage(B, "!rezzorder a > b", 2000);
+		CHECK(s.GetView(2500).Bench == 0);
+	}
+
 	void TestSharedOrderFromLeaderIsApplied()
 	{
 		Rezz::Session s;
@@ -1235,6 +1627,18 @@ int main()
 		{ "illusion without its apply", TestIllusionWithoutItsApply },
 		{ "leaving the squad drops from the order", TestLeavingTheSquadDropsFromTheOrder },
 		{ "swapping character drops from the order", TestSwappingCharacterDropsFromTheOrder },
+		{ "bench swap takes the place", TestBenchSwapTakesThePlace },
+		{ "bench swap keeps the turn", TestBenchSwapKeepsTheTurn },
+		{ "reshuffle is not a swap", TestReshuffleIsNotASwap },
+		{ "leaver is replaced in their place", TestLeaverIsReplacedInTheirPlace },
+		{ "joining is not moving in", TestJoiningIsNotMovingIn },
+		{ "rejoining gets the place back", TestRejoiningGetsThePlaceBack },
+		{ "several swaps in one subgroup", TestSeveralSwapsInOneSubgroup },
+		{ "misdrag is undone", TestMisdragIsUndone },
+		{ "neighbours come back in order", TestNeighboursComeBackInOrder },
+		{ "character swaps around a swap", TestCharacterSwapsAroundASwap },
+		{ "share carries the bench", TestShareCarriesTheBench },
+		{ "bench is the last subgroup", TestBenchIsTheLastSubgroup },
 		{ "share carries precast", TestShareCarriesPrecast },
 		{ "share ignores abusive lines", TestShareIgnoresAbusiveLines },
 		{ "shared precast reaches the session", TestSharedPrecastReachesTheSession },

@@ -1,5 +1,6 @@
 #include "Settings.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <string>
@@ -62,6 +63,11 @@ namespace Settings
 
 			if (key == "order") { if (!value.empty()) { values.Order.push_back(value); } }
 			else if (key == "precast") { if (!value.empty()) { values.Precast.push_back(value); } }
+			else if (key == "bench_subgroup")
+			{
+				int bench = std::atoi(value.c_str());
+				values.Bench = bench == 255 ? 255 : std::clamp(bench, 0, 15);
+			}
 			else if (key == "nick")
 			{
 				// nick=<account>=<nickname>
@@ -111,6 +117,7 @@ namespace Settings
 			else if (key == "prefer_account") { values.PreferAccount = ParseBool(value); }
 			else if (key == "share_from_leaders") { values.ShareFromLeaders = ParseBool(value); }
 			else if (key == "share_from_anyone") { values.ShareFromAnyone = ParseBool(value); }
+			else if (key == "substitute_by_subgroup") { values.Substitutes = ParseBool(value); }
 			else if (key == "answer_requests") { values.AnswerRequests = std::atoi(value.c_str()); }
 			else if (key == "banner_on_leave") { values.BannerOnLeave = ParseBool(value); }
 			else if (key == "banner_on_swap") { values.BannerOnSwap = ParseBool(value); }
@@ -175,6 +182,7 @@ namespace Settings
 			const Values& v = Current;
 			for (const std::string& account : v.Order) { out << "order=" << account << "\n"; }
 			for (const std::string& account : v.Precast) { out << "precast=" << account << "\n"; }
+			out << "bench_subgroup=" << v.Bench << "\n";
 			for (const auto& [account, nickname] : v.Nicknames) { out << "nick=" << account << "=" << nickname << "\n"; }
 			for (const auto& [name, accounts] : v.Presets)
 			{
@@ -205,6 +213,7 @@ namespace Settings
 			out << "prefer_account=" << v.PreferAccount << "\n";
 			out << "share_from_leaders=" << v.ShareFromLeaders << "\n";
 			out << "share_from_anyone=" << v.ShareFromAnyone << "\n";
+			out << "substitute_by_subgroup=" << v.Substitutes << "\n";
 			out << "answer_requests=" << v.AnswerRequests << "\n";
 			out << "banner_on_leave=" << v.BannerOnLeave << "\n";
 			out << "banner_on_swap=" << v.BannerOnSwap << "\n";

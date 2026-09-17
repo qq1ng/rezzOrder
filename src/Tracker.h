@@ -90,6 +90,8 @@ namespace Rezz
 		// Takes one player out without restarting the rotation: somebody leaving is not a new order, and the
 		// people still in it keep their turn. Returns whether they were in the order at all.
 		bool RemoveFromOrder(const std::string& aAccount);
+		// Puts a player in at a place (clamped to the end) without restarting the rotation.
+		void InsertIntoOrder(size_t aIndex, const std::string& aAccount);
 		// Forgets who cast last, so the turn starts again from the first player who can revive.
 		void ResetRotation() { m_LastOrderedUser.clear(); }
 		const std::vector<std::string>& Order() const { return m_Order; }

@@ -255,8 +255,10 @@ namespace Live
 
 	void SetOrder(const std::vector<std::string>& aAccounts) { s_View.Order = aAccounts; }
 	void SetPrecast(const std::vector<std::string>& aAccounts) { s_View.Precast = aAccounts; }
+	void SetBench(int aSubgroup) { s_View.Bench = static_cast<uint16_t>(aSubgroup); }
 	void SetShareRules(bool, bool) {}
 	void SetAnswerRule(int) {}
+	void SetSubstitutes(bool) {}
 	void AcceptShare() { s_View.HasShare = false; }
 	void DismissShare() { s_View.HasShare = false; }
 	void ClearRequest() { s_View.HasRequest = false; }

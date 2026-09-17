@@ -348,9 +348,14 @@ namespace Rezz
 		uint32_t previousProfession = member.Profession;
 		std::string previousCharacter = member.Character;
 		member.Character = aUpdate.Character;
-		if (aUpdate.Profession != 0) { member.Profession = aUpdate.Profession; }
-		member.Elite = aUpdate.Elite;
-		member.Subgroup = aUpdate.Subgroup;
+		// While a player loads, arcdps reports profession 0 and elite 0: keep what was known.
+		if (aUpdate.Profession != 0)
+		{
+			member.Profession = aUpdate.Profession;
+			member.Elite = aUpdate.Elite;
+		}
+		// arcdps' subgroup is 1 for everybody in the field logs; Unofficial Extras' is the real one.
+		if (!m_Subgroups.count(account)) { member.Subgroup = aUpdate.Subgroup; }
 		member.OnMap = true;
 		m_Tracker.SetAway(aNowMs, account, false);
 		std::erase_if(m_PendingLeaves, [&](const PendingLeave& aLeave) { return aLeave.Account == account; });
@@ -363,20 +368,36 @@ namespace Rezz
 			IsUsableCharacterName(previousCharacter) && IsUsableCharacterName(member.Character);
 		bool changed = swappedProfession || swappedCharacter;
 		if (changed) { m_Tracker.ForgetSkills(account); member.SeenGroups = 0; }
+		if (m_Substitutes && !m_Vacancies.empty())
+		{
+			// Swapped out to something without a revive skill and back again; or a substitute who moved in on
+			// the wrong character and is now on the right one.
+			if (!isSelf && !InOrder(account) && SureReviver(member)) { ReclaimPlace(account, aNowMs, SubgroupOf(account)); }
+			MatchSubstitutes(aNowMs);
+		}
 		if (isSelf || !InOrder(account)) { m_Reported.erase(account); return; }
 
 		if (changed)
 		{
-			// A different skill bar means the old revive skill state no longer applies, and there is no
-			// telling whether the new one even carries a revive skill. They come out and can be added back.
 			int standing = SelfStanding(aNowMs);
 			std::string text = Named(account) + (swappedProfession
 				? " swapped to " + std::string(ProfessionShortName(member.Profession))
 				: " swapped character");
-			if (!IsReviveProfession(member.Profession)) { text += " (no revive skill)"; }
-			DropFromOrder(account);
-			text += ", out of the order";
+			if (m_Substitutes && SureReviver(member))
+			{
+				// Druids and troubadours carry their revive skill on any character. Its state starts again unknown.
+				text += ", keeps their place";
+			}
+			else
+			{
+				// A different skill bar, and no telling whether it carries a revive skill. The place stays open for
+				// a substitute, or for them swapping back.
+				if (!IsReviveProfession(member.Profession)) { text += " (no revive skill)"; }
+				DropFromOrder(account, SubgroupOf(account), aNowMs);
+				text += ", out of the order";
+			}
 			Notify(NoticeKind::ChangedProfession, account, text + StandingChange(standing, SelfStanding(aNowMs)));
+			MatchSubstitutes(aNowMs);
 		}
 		else if (m_Reported.count(account))
 		{
@@ -391,11 +412,46 @@ namespace Rezz
 		m_HasRoles = true;
 		RosterMember& member = GetMember(aAccount);
 		member.Role = aRole;
-		member.Subgroup = aSubgroup;
+		if (aSubgroup != 0) { member.Subgroup = aSubgroup; } // 0 only while loading or not in the squad
 
 		if (member.IsSelf && aRole == SquadRole::None) { OnSelfLeftSquad(); }
 
 		bool inSquad = aRole == SquadRole::Leader || aRole == SquadRole::Lieutenant || aRole == SquadRole::Member;
+		uint16_t previousGroup = SubgroupOf(aAccount);
+		if (inSquad && aSubgroup != 0 && aSubgroup != previousGroup)
+		{
+			bool toBench = previousGroup != 0 && IsBench(aSubgroup, aAccount);
+			m_Subgroups[aAccount] = aSubgroup;
+			std::erase_if(m_Arrivals, [&](const Arrival& aArrival) { return aArrival.Account == aAccount; });
+			if (m_Substitutes)
+			{
+				if (previousGroup == 0)
+				{
+					// No subgroup before: they just joined the squad, or Unofficial Extras is listing the squad for
+					// the first time (our own start or reload). Neither is moving in, and treating it as one would
+					// let whoever already stood in a subgroup take a benched player's place on this client alone.
+					ReclaimPlace(aAccount, aNowMs, 0);
+				}
+				else if (InOrder(aAccount))
+				{
+					if (toBench)
+					{
+						m_LastBenched = aSubgroup;
+						int standing = SelfStanding(aNowMs);
+						std::string name = Named(aAccount);
+						DropFromOrder(aAccount, previousGroup, aNowMs);
+						Notify(NoticeKind::Substituted, aAccount, name + " went to the bench, out of the order" +
+							StandingChange(standing, SelfStanding(aNowMs)));
+					}
+				}
+				else if (!ReclaimPlace(aAccount, aNowMs, aSubgroup))
+				{
+					m_Arrivals.push_back(Arrival{ aAccount, aSubgroup, aNowMs });
+				}
+				MatchSubstitutes(aNowMs);
+			}
+		}
+
 		if (inSquad == member.InSquad) { return; }
 		member.InSquad = inSquad;
 		if (inSquad || member.IsSelf || aRole != SquadRole::None) { return; } // invited/applied: not a leave
@@ -404,12 +460,14 @@ namespace Rezz
 		int standing = SelfStanding(aNowMs);
 		m_Tracker.SetAway(aNowMs, aAccount, true);
 		std::erase_if(m_PendingLeaves, [&](const PendingLeave& aLeave) { return aLeave.Account == aAccount; });
+		std::erase_if(m_Arrivals, [&](const Arrival& aArrival) { return aArrival.Account == aAccount; });
+		m_Subgroups.erase(aAccount);
 		if (InOrder(aAccount))
 		{
 			// Their place is part of the message, so it is read off before they lose it.
 			std::string name = Named(aAccount);
 			bool report = !m_Reported.count(aAccount);
-			DropFromOrder(aAccount);
+			DropFromOrder(aAccount, previousGroup, aNowMs);
 			// Somebody ahead of us dropping out is how the turn reaches us without anyone casting.
 			if (report)
 			{
@@ -417,15 +475,204 @@ namespace Rezz
 					StandingChange(standing, SelfStanding(aNowMs)));
 				m_Reported[aAccount] = true;
 			}
+			MatchSubstitutes(aNowMs);
 		}
 	}
 
-	void Session::DropFromOrder(const std::string& aAccount)
+	uint16_t Session::SubgroupOf(const std::string& aAccount) const
 	{
+		auto it = m_Subgroups.find(aAccount);
+		return it == m_Subgroups.end() ? 0 : it->second;
+	}
+
+	bool Session::SureReviver(const RosterMember& aMember) const
+	{
+		constexpr uint32_t kDruid = 5, kTroubadour = 73;
+		if (aMember.Profession == 0) { return false; }
+		return aMember.Elite == kDruid || aMember.Elite == kTroubadour || aMember.SeenGroups != 0;
+	}
+
+	void Session::SetBench(uint16_t aBench)
+	{
+		uint16_t bench = Share::BenchFromName(Share::BenchName(aBench));
+		if (bench != m_BenchGroup) { m_LastBenched = 0; }
+		m_BenchGroup = bench;
+	}
+
+	bool Session::IsBench(uint16_t aGroup, const std::string& aMover) const
+	{
+		if (m_BenchGroup == 0 || aGroup == 0) { return false; }
+		if (m_BenchGroup == Share::kBenchLast)
+		{
+			// The highest subgroup anybody is in, the mover counted where they still are. An empty subgroup past
+			// it is a new group being built, unless it is the bench that the last swap emptied.
+			uint16_t last = 0;
+			for (const auto& [account, group] : m_Subgroups) { last = std::max(last, group); }
+			bool emptiedBench = aGroup > last && aGroup == m_LastBenched;
+			if (aGroup != last && !emptiedBench) { return false; }
+		}
+		else if (aGroup != m_BenchGroup) { return false; }
+
+		for (const std::string& other : m_Tracker.Order())
+		{
+			if (other != aMover && SubgroupOf(other) == aGroup) { return false; }
+		}
+		return true;
+	}
+
+	void Session::SetSubstitutes(bool aEnabled)
+	{
+		m_Substitutes = aEnabled;
+		if (!aEnabled)
+		{
+			m_Vacancies.clear();
+			m_Arrivals.clear();
+		}
+	}
+
+	void Session::DropFromOrder(const std::string& aAccount, uint16_t aOpenFor, uint64_t aNowMs)
+	{
+		const std::vector<std::string>& order = m_Tracker.Order();
+		auto it = std::find(order.begin(), order.end(), aAccount);
+		if (it == order.end()) { return; }
+		size_t place = static_cast<size_t>(it - order.begin());
+		bool precast = std::find(m_Precast.begin(), m_Precast.end(), aAccount) != m_Precast.end();
+		bool open = m_Substitutes && aOpenFor != 0;
+
+		// Open places are kept as "in front of whoever is at Index". The ones in front of this player stay; the
+		// ones right behind now wait in front of the player after them, behind this place.
+		uint32_t ahead = 0;
+		for (const Vacancy& vacancy : m_Vacancies) { if (vacancy.Index == place) { ahead++; } }
+		for (Vacancy& vacancy : m_Vacancies)
+		{
+			if (vacancy.Index <= place) { continue; }
+			if (vacancy.Index == place + 1) { vacancy.Tie += ahead + (open ? 1 : 0); }
+			vacancy.Index--;
+		}
+
 		// Not SetOrder: that treats any change as a new order and starts the rotation again, which would move
 		// everyone's turn because one person walked away.
 		m_Tracker.RemoveFromOrder(aAccount);
 		std::erase(m_Precast, aAccount);
+		std::erase_if(m_Vacancies, [&](const Vacancy& aVacancy) { return aVacancy.Account == aAccount; });
+		if (open)
+		{
+			auto member = m_Roster.find(aAccount);
+			uint32_t profession = member == m_Roster.end() ? 0 : member->second.Profession;
+			m_Vacancies.push_back(Vacancy{ aAccount, aOpenFor, profession, aNowMs, place, ahead, precast });
+		}
+	}
+
+	void Session::FillPlace(size_t aIndex, const std::string& aAccount)
+	{
+		Vacancy filled = m_Vacancies[aIndex];
+		m_Vacancies.erase(m_Vacancies.begin() + static_cast<std::ptrdiff_t>(aIndex));
+		m_Tracker.InsertIntoOrder(filled.Index, aAccount);
+		if (filled.Precast && std::find(m_Precast.begin(), m_Precast.end(), aAccount) == m_Precast.end())
+		{
+			m_Precast.push_back(aAccount);
+		}
+		for (Vacancy& vacancy : m_Vacancies)
+		{
+			if (vacancy.Index > filled.Index) { vacancy.Index++; }
+			else if (vacancy.Index == filled.Index && vacancy.Tie > filled.Tie)
+			{
+				vacancy.Index++;
+				vacancy.Tie -= filled.Tie + 1;
+			}
+		}
+		std::erase_if(m_Arrivals, [&](const Arrival& aArrival) { return aArrival.Account == aAccount; });
+		m_Reported.erase(aAccount);
+	}
+
+	bool Session::ReclaimPlace(const std::string& aAccount, uint64_t aNowMs, uint16_t aSubgroup)
+	{
+		if (InOrder(aAccount)) { return false; }
+		for (size_t i = 0; i < m_Vacancies.size(); i++)
+		{
+			const Vacancy& vacancy = m_Vacancies[i];
+			if (vacancy.Account != aAccount || vacancy.TimeMs + kSubstituteWindowMs < aNowMs) { continue; }
+			if (aSubgroup != 0 && vacancy.Subgroup != aSubgroup) { continue; }
+			int standing = SelfStanding(aNowMs);
+			FillPlace(i, aAccount);
+			Notify(NoticeKind::Returned, aAccount, Named(aAccount) + " is back in their place" +
+				StandingChange(standing, SelfStanding(aNowMs)));
+			return true;
+		}
+		return false;
+	}
+
+	void Session::MatchSubstitutes(uint64_t aNowMs)
+	{
+		auto stale = [aNowMs](uint64_t aTimeMs) { return aTimeMs + kSubstituteWindowMs < aNowMs; };
+		std::erase_if(m_Vacancies, [&](const Vacancy& aVacancy) { return stale(aVacancy.TimeMs) || InOrder(aVacancy.Account); });
+		std::erase_if(m_Arrivals, [&](const Arrival& aArrival) { return stale(aArrival.TimeMs); });
+
+		auto professionOf = [this](const std::string& aAccount)
+		{
+			auto it = m_Roster.find(aAccount);
+			return it == m_Roster.end() ? 0u : it->second.Profession;
+		};
+
+		for (size_t i = 0; i < m_Vacancies.size(); )
+		{
+			const Vacancy vacancy = m_Vacancies[i];
+
+			std::vector<std::string> candidates;
+			for (const Arrival& arrival : m_Arrivals)
+			{
+				if (arrival.Subgroup != vacancy.Subgroup || SubgroupOf(arrival.Account) != vacancy.Subgroup ||
+					InOrder(arrival.Account)) { continue; }
+				auto member = m_Roster.find(arrival.Account);
+				// On the wrong character, or not on our map yet: waits, and counts once that changes.
+				if (member != m_Roster.end() && SureReviver(member->second)) { candidates.push_back(arrival.Account); }
+			}
+			if (candidates.empty()) { i++; continue; }
+
+			int holes = 0, sameHoles = 0;
+			for (const Vacancy& other : m_Vacancies)
+			{
+				if (other.Subgroup != vacancy.Subgroup) { continue; }
+				holes++;
+				if (other.Profession == vacancy.Profession) { sameHoles++; }
+			}
+
+			std::string pick;
+			if (candidates.size() == 1 && holes == 1) { pick = candidates[0]; }
+			else
+			{
+				// Several at once: a druid replaces a druid. Only when that leaves no doubt either way.
+				std::vector<std::string> same;
+				for (const std::string& candidate : candidates)
+				{
+					if (professionOf(candidate) == vacancy.Profession) { same.push_back(candidate); }
+				}
+				if (same.size() == 1 && sameHoles == 1) { pick = same[0]; }
+				else if (static_cast<int>(candidates.size()) >= holes)
+				{
+					// Everybody has moved and it still can't be told apart: say so once and leave it to them.
+					uint16_t group = vacancy.Subgroup;
+					std::string names;
+					for (const Vacancy& other : m_Vacancies)
+					{
+						if (other.Subgroup == group) { names += (names.empty() ? "" : ", ") + DisplayAccount(other.Account); }
+					}
+					Notify(NoticeKind::Substituted, vacancy.Account, "Can't tell who replaces " + names + " (subgroup " +
+						std::to_string(group) + "), add them by hand");
+					std::erase_if(m_Vacancies, [group](const Vacancy& aOther) { return aOther.Subgroup == group; });
+					std::erase_if(m_Arrivals, [group](const Arrival& aOther) { return aOther.Subgroup == group; });
+					i = 0;
+					continue;
+				}
+				else { i++; continue; } // more moves are on their way
+			}
+
+			int standing = SelfStanding(aNowMs);
+			FillPlace(i, pick);
+			Notify(NoticeKind::Substituted, pick, Named(pick) + " took the place of " + DisplayAccount(vacancy.Account) +
+				StandingChange(standing, SelfStanding(aNowMs)));
+			i = 0;
+		}
 	}
 
 	void Session::MatchIllusion(uint64_t aTimeMs, const std::string& aAccount, bool aIsCast)
@@ -489,6 +736,11 @@ namespace Rezz
 		m_Tracker.SetOrder({});
 		m_PendingLeaves.clear();
 		m_Reported.clear();
+		m_Vacancies.clear();
+		m_Arrivals.clear();
+		m_Subgroups.clear();
+		m_BenchGroup = 0;
+		m_LastBenched = 0;
 		ClearRequest();
 		DismissShare();
 		Notify(NoticeKind::OrderCleared, m_SelfAccount, "You left the squad: revive order cleared");
@@ -497,6 +749,8 @@ namespace Rezz
 	void Session::Tick(uint64_t aNowMs)
 	{
 		std::erase_if(m_Illusions, [aNowMs](const auto& aEntry) { return aEntry.second.EndsAt <= aNowMs; });
+		// A profession arcdps only now reported can settle a swap that was waiting on it.
+		if (!m_Vacancies.empty()) { MatchSubstitutes(aNowMs); }
 
 		// Out of a fight the turn is always at the top of the order (decided with the squad, 2026-09-16).
 		// Field test: whoever cast last was remembered into the next fight, so the turn started somewhere in
@@ -542,6 +796,8 @@ namespace Rezz
 
 	void Session::SetOrder(std::vector<std::string> aAccounts)
 	{
+		// Open places are positions in the order they were left from: a new order makes them meaningless.
+		if (aAccounts != m_Tracker.Order()) { m_Vacancies.clear(); }
 		m_Tracker.SetOrder(std::move(aAccounts));
 		m_OrderFrom.clear();
 	}
@@ -609,13 +865,15 @@ namespace Rezz
 			int before = SelfPlace();
 			SetOrder(resolved.Accounts);
 			SetPrecast(resolved.Precast);
+			SetBench(message.Bench);
 			m_OrderFrom = aAccount;
 			m_HasShare = false;
 			Notify(NoticeKind::ShareApplied, aAccount, what + PlaceChange(before));
 			return;
 		}
 
-		m_Share = SharedOrder{ aAccount, role, resolved.Accounts, resolved.Precast, resolved.Unknown, SelfPlace(), 0, aNowMs };
+		m_Share = SharedOrder{ aAccount, role, resolved.Accounts, resolved.Precast, resolved.Unknown, SelfPlace(), 0, aNowMs,
+			message.Bench };
 		auto mine = std::find(resolved.Accounts.begin(), resolved.Accounts.end(), m_SelfAccount);
 		m_Share.OurPlaceThen = mine == resolved.Accounts.end() ? 0
 			: static_cast<int>(mine - resolved.Accounts.begin()) + 1;
@@ -629,6 +887,7 @@ namespace Rezz
 		int before = SelfPlace();
 		SetOrder(m_Share.Accounts);
 		SetPrecast(m_Share.Precast);
+		SetBench(m_Share.Bench);
 		m_OrderFrom = m_Share.From;
 		m_HasShare = false;
 		Notify(NoticeKind::ShareApplied, m_Share.From, "using " + DisplayAccount(m_Share.From) + "'s revive order (" +
@@ -664,6 +923,7 @@ namespace Rezz
 		view.BackupIndex = view.Turn.BackupIndex;
 		view.Order = m_Tracker.Order();
 		view.Precast = m_Precast;
+		view.Bench = m_BenchGroup;
 		view.SelfAccount = m_SelfAccount;
 		view.SquadInCombat = m_CombatSinceMs != 0;
 		view.NowMs = aNowMs;

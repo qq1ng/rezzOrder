@@ -37,7 +37,7 @@ namespace Rezz::Share
 			return aText.size() >= aPrefix.size() && aText.compare(0, aPrefix.size(), aPrefix) == 0;
 		}
 
-		std::string Join(const std::vector<std::string>& aTokens, const std::vector<bool>& aPrecast)
+		std::string Join(const std::vector<std::string>& aTokens, const std::vector<bool>& aPrecast, uint16_t aBench)
 		{
 			std::string line = kPrefix;
 			for (size_t i = 0; i < aTokens.size(); i++)
@@ -45,14 +45,16 @@ namespace Rezz::Share
 				line += (i == 0 ? " " : kSeparator) + aTokens[i];
 				if (i < aPrecast.size() && aPrecast[i]) { line += kPrecastMark; }
 			}
+			if (aBench != 0) { line += kSeparator + std::string(kBenchToken) + BenchName(aBench); }
 			return line;
 		}
 	}
 
 	std::string Encode(const std::vector<std::string>& aOrder, const std::vector<std::string>& aPrecast,
-		const std::vector<RosterMember>& aRoster)
+		const std::vector<RosterMember>& aRoster, uint16_t aBench)
 	{
 		if (aOrder.empty()) { return {}; }
+		aBench = BenchFromName(BenchName(aBench));
 
 		// The part before the dot is what people call each other, unless two squad members share it.
 		std::vector<std::string> tokens;
@@ -69,7 +71,7 @@ namespace Rezz::Share
 			precast.push_back(std::find(aPrecast.begin(), aPrecast.end(), account) != aPrecast.end());
 		}
 
-		std::string line = Join(tokens, precast);
+		std::string line = Join(tokens, precast, aBench);
 		if (line.size() <= kMaxChatChars) { return line; }
 
 		// Too long: shorten every name, longest prefix first, and stop at the first length that fits. Lengths
@@ -82,18 +84,35 @@ namespace Rezz::Share
 			std::sort(unique.begin(), unique.end());
 			if (std::adjacent_find(unique.begin(), unique.end()) != unique.end()) { continue; }
 
-			line = Join(shortened, precast);
+			line = Join(shortened, precast, aBench);
 			tokens = shortened; // the shortest that still tells them apart, in case nothing fits
 			if (line.size() <= kMaxChatChars) { return line; }
 		}
 
 		// Still too long: the players at the end of a very long order are the ones who lose their turn last.
-		while (tokens.size() > 1 && Join(tokens, precast).size() > kMaxChatChars)
+		while (tokens.size() > 1 && Join(tokens, precast, aBench).size() > kMaxChatChars)
 		{
 			tokens.pop_back();
 			precast.pop_back();
 		}
-		return Join(tokens, precast);
+		return Join(tokens, precast, aBench);
+	}
+
+	std::string BenchName(uint16_t aBench)
+	{
+		if (aBench == kBenchLast) { return "last"; }
+		if (aBench >= 1 && aBench <= kMaxSubgroup) { return std::to_string(aBench); }
+		return "none";
+	}
+
+	uint16_t BenchFromName(const std::string& aName)
+	{
+		std::string name = Lower(Trim(aName));
+		if (name == "last") { return kBenchLast; }
+		bool digits = !name.empty() && name.size() <= 2 &&
+			std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+		int group = digits ? std::stoi(name) : 0;
+		return group >= 1 && group <= kMaxSubgroup ? static_cast<uint16_t>(group) : 0;
 	}
 
 	Message Parse(const std::string& aText)
@@ -119,6 +138,13 @@ namespace Rezz::Share
 				std::string name = Trim(token);
 				token.clear();
 				if (name.empty()) { continue; }
+
+				// "bench:5" or "bench:last": the bench subgroup, not a player.
+				if (StartsWith(Lower(name), kBenchToken))
+				{
+					message.Bench = BenchFromName(name.substr(std::string(kBenchToken).size()));
+					continue;
+				}
 
 				Entry entry;
 				// A trailing "*" means they may spend their revive before their turn comes.

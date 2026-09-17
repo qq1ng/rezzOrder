@@ -17,9 +17,10 @@ same downed player.
    [deltaconnected.com/arcdps](https://www.deltaconnected.com/arcdps/). *ArcDPS Integration* is a separate
    addon you install from the Nexus addon library (Nexus menu, Addons, search for it). It is what passes
    ArcDPS combat events on to other addons, and without it this addon sees nothing at all.
-3. **Unofficial Extras** (optional but strongly recommended), from
-   [its releases page](https://github.com/Krappa322/arcdps_unofficial_extras_releases). It adds squad roles,
-   instant notice when somebody leaves the squad, and the squad chat messages needed for order sharing.
+3. **Unofficial Extras**, from
+   [its releases page](https://github.com/Krappa322/arcdps_unofficial_extras_releases). Required: it provides
+   squad roles, subgroups, instant notice when somebody leaves the squad, and the squad chat messages needed for
+   order sharing. Without it the addon still counts revives, but sharing, bench swaps and leave detection don't work.
 4. Put `RezzOrder.dll` into `<Guild Wars 2>\addons\`.
 5. Start the game. You should get a message telling you everything was found, or naming what
    is missing.
@@ -55,6 +56,35 @@ instant revive are listed unless you tick *all professions*.
 Leaving the squad or swapping to another character takes that player out of the order by itself, and
 everybody still in it keeps their turn. Moving to another map does not: they show as `away` and are skipped
 until they are back.
+
+### Bench swaps
+
+Squads that rotate players in and out don't have to touch the order. Pick the **bench subgroup** in the order
+editor: *last* (the highest subgroup in use, which follows the squad as it fills up), or a fixed number such as 1.
+It is part of the order and goes into squad chat with it (`... > ted* > bench:last`), so everyone uses the same
+one. Then swap people in the squad window as usual:
+
+1. Move the player going out to the bench. They leave the order at once.
+2. Move the player coming in to the subgroup they left, within 2 minutes.
+
+The newcomer takes their exact place, `*` mark and turn included, on every client. The two moves can come in
+either order.
+
+- Only a druid, a troubadour, or somebody the addon has seen use a revive skill can take a place: not every
+  warrior carries Battle Standard. Moved in on the wrong character, they get it once they swap.
+- Moving somebody between the fighting subgroups changes nothing, even into a subgroup with nobody from the order.
+- A subgroup with anybody from the order in it is never the bench, so a night without a bench, where the last
+  subgroup is a fighting group, is safe as long as somebody from the order is in it.
+- With *last*, an empty subgroup past the last one in use is a new group being built, not the bench.
+- Dragged to the bench by mistake? Move them back within 2 minutes and they have their place again.
+- A player leaving the squad, or swapping to a character without a sure revive, leaves their place open the same
+  way. Rejoining or swapping back within 2 minutes gives it back. A druid or troubadour swapping to another
+  druid or troubadour keeps it.
+- Several swaps in one subgroup are matched by profession. If that still can't tell them apart, the places stay
+  empty and a message says to add them by hand.
+- Without a bench subgroup set, nobody is benched.
+
+Nexus options, *Bench swaps*. On by default.
 
 ### Customizable
 

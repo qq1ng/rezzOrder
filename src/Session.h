@@ -40,9 +40,10 @@ namespace Rezz
 
 	// OrderCleared: we left the squad, so the order (which belongs to that squad) was removed.
 	// ShareApplied: someone's shared order was taken over. ShareOffered: it is waiting for us to accept it.
-	// ShareRequested: somebody asked the squad for the order.
+	// ShareRequested: somebody asked the squad for the order. Substituted: somebody moved into the subgroup of a
+	// player in the order who was benched, and took their place.
 	enum class NoticeKind : uint8_t { LeftSquad, LeftMap, Returned, ChangedProfession, OrderCleared,
-		ShareApplied, ShareOffered, ShareRequested };
+		ShareApplied, ShareOffered, ShareRequested, Substituted };
 
 	// A revive order somebody sent in squad chat.
 	struct SharedOrder
@@ -55,6 +56,7 @@ namespace Rezz
 		int                      OurPlaceNow  = 0;            // 1-based place in the order we have, 0 not in it
 		int                      OurPlaceThen = 0;            // ... and in the one being offered
 		uint64_t                 TimeMs   = 0;
+		uint16_t                 Bench    = 0;                // bench subgroup it names (Share::kBenchLast: the last), 0 none
 	};
 
 	// Somebody revived by Illusion of Life. They go down again when it runs out, unless they rally first.
@@ -79,6 +81,7 @@ namespace Rezz
 		std::vector<RosterMember> Roster;           // sorted: revive professions first, then by account
 		std::vector<std::string>  Order;
 		std::vector<std::string>  Precast;         // of those, the ones free to cast before their turn
+		uint16_t                  Bench = 0;       // the squad's bench subgroup for bench swaps (Share::kBenchLast: the last), 0 none
 		bool                      SquadInCombat = false;
 		uint64_t                  NowMs         = 0;
 		std::string               SelfAccount;
@@ -121,6 +124,10 @@ namespace Rezz
 		// fights were under five seconds and there was no natural gap to go by. Twenty seconds merged its 114
 		// fights into 49 engagements of about a minute each, which is what a squad would call a fight.
 		static constexpr uint64_t kRotationResetMs = 20 * 1000;
+		// How long a place stays open for a substitute, or for its player to come back. A bench swap is two
+		// moves in the squad window in either order, but the one coming in may still have to swap character
+		// (a loading screen) before they count.
+		static constexpr uint64_t kSubstituteWindowMs = 120 * 1000;
 
 		// Squad channel combat event. aNowMs is the arrival time (timeGetTime), used only for roster timing;
 		// the tracker works in event time.
@@ -152,6 +159,24 @@ namespace Rezz
 		// everyone took the order from the commander, that is exactly one person.
 		enum class AnswerRule : uint8_t { Never = 0, WhenOrderIsOurs = 1, Always = 2 };
 		void SetAnswerRule(AnswerRule aRule);
+		// Bench swaps (decided with the squad, 2026-09-17). Needs Unofficial Extras, the only source of subgroup
+		// moves.
+		//   - The bench is set with the order (SetBench) and shared with it: a subgroup number, or "last", which
+		//     follows the squad as it fills up. A subgroup without anybody from the order can just as well be a
+		//     full fighting group, so that alone never makes it the bench. Moving somebody from the order into the
+		//     bench takes them out at once; moving them into any other subgroup is a reshuffle.
+		//   - A subgroup with somebody from the order in it is never the bench: some nights there is no bench and
+		//     the last subgroup is a fighting group, sometimes with one player from the order alone in it.
+		//   - Leaving the squad, or swapping to a character that isn't a sure reviver, takes them out too.
+		//   - The place stays open for kSubstituteWindowMs. A sure reviver who moves (not joins) into the subgroup
+		//     it was left from takes it; the player who left it gets it back by returning.
+		//   - A sure reviver is a druid or a troubadour, or anyone seen using a revive skill on this character:
+		//     not every warrior carries Battle Standard.
+		//   - A player in the order swapping to a sure reviver keeps their place.
+		void SetSubstitutes(bool aEnabled);
+		// The bench: a subgroup, Share::kBenchLast, or 0 none (no bench swaps; leaving and swapping character
+		// still leave a place open).
+		void SetBench(uint16_t aBench);
 		const std::vector<std::string>& Order() const { return m_Tracker.Order(); }
 
 		SessionView GetView(uint64_t aNowMs) const;
@@ -194,9 +219,21 @@ namespace Rezz
 		// A completed Illusion of Life cast (aIsCast) or an ally getting up, matched against the other kind at the
 		// same instant: stands in for the effect's apply until one has been seen.
 		void MatchIllusion(uint64_t aTimeMs, const std::string& aAccount, bool aIsCast);
-		// Somebody in the order is gone for good (left the squad, or swapped to another character). Takes them
-		// out of the order and the precast list, leaving everyone else's turn alone.
-		void DropFromOrder(const std::string& aAccount);
+		// Takes somebody out of the order and the precast list, leaving everyone else's turn alone. With a
+		// subgroup (and substitutes on) their place stays open for a substitute moving into that subgroup.
+		void DropFromOrder(const std::string& aAccount, uint16_t aOpenFor = 0, uint64_t aNowMs = 0);
+		// Pairs open places with sure revivers who moved into the subgroup they were left from.
+		void MatchSubstitutes(uint64_t aNowMs);
+		// Puts aAccount into the open place m_Vacancies[aIndex] and closes it.
+		void FillPlace(size_t aIndex, const std::string& aAccount);
+		// The player who left a place gets it back: rejoining the squad (aSubgroup 0), or returning to the
+		// subgroup they left it from.
+		bool ReclaimPlace(const std::string& aAccount, uint64_t aNowMs, uint16_t aSubgroup);
+		bool SureReviver(const RosterMember& aMember) const;
+		// Whether moving aMover into aGroup puts them on the bench. Called before the move is recorded.
+		bool IsBench(uint16_t aGroup, const std::string& aMover) const;
+		// Unofficial Extras' subgroup for a player, 0 unknown.
+		uint16_t SubgroupOf(const std::string& aAccount) const;
 
 		Tracker                                       m_Tracker;
 		std::unordered_map<std::string, RosterMember> m_Roster;
@@ -236,6 +273,32 @@ namespace Rezz
 		// window with notices. Their question still refreshes, it just stops being announced again.
 		std::string                                   m_AskedNoticeFrom;
 		uint64_t                                      m_AskedNoticeMs   = 0;
+		// A place in the order left open: its player went to the bench, left the squad or swapped character.
+		struct Vacancy
+		{
+			std::string Account;          // who left it
+			uint16_t    Subgroup   = 0;   // the subgroup they left it from
+			uint32_t    Profession = 0;
+			uint64_t    TimeMs     = 0;
+			size_t      Index      = 0;   // it goes in front of the player now at this place in the order...
+			uint32_t    Tie        = 0;   // ... behind the open places there with a lower Tie
+			bool        Precast    = false;
+		};
+		// A player outside the order who moved into a subgroup.
+		struct Arrival
+		{
+			std::string Account;
+			uint16_t    Subgroup = 0;
+			uint64_t    TimeMs   = 0;
+		};
+		std::deque<Vacancy>                           m_Vacancies;
+		std::deque<Arrival>                           m_Arrivals;
+		// Last subgroup Unofficial Extras reported. Kept apart from RosterMember::Subgroup, which arcdps also
+		// writes, and never 0: Extras reports 0 for a moment while a player loads into a map.
+		std::unordered_map<std::string, uint16_t>     m_Subgroups;
+		uint16_t                                      m_BenchGroup  = 0; // the squad's bench setting, 0 none
+		uint16_t                                      m_LastBenched = 0; // subgroup somebody was last benched into
+		bool                                          m_Substitutes = true;
 		std::string                                   m_OrderFrom;   // empty: we built this order ourselves
 		std::vector<std::string>                      m_Precast;
 		AnswerRule                                    m_AnswerRule   = AnswerRule::WhenOrderIsOurs;

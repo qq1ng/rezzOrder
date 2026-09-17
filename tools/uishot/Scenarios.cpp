@@ -18,14 +18,14 @@ namespace Shots
 		// here is a real player: these screenshots end up in the README.
 		const Player kRoster[] = {
 			{ ":Sereth.4127",   "Sereth Vale",     7, 73 }, // Mesmer / Troubadour
-			{ ":Kalden.5076",   "Kalden Roth",     6, 80 }, // Elementalist / Catalyst
-			{ ":Maryth.2081",   "Maryth Solane",   6, 56 }, // Elementalist / Tempest
-			{ ":Orrin.9143",    "Orrin Kade",      7, 59 }, // Mesmer / Chronomancer
-			{ ":Brisa.3388",    "Brisa Thornwood", 4, 55 }, // Ranger / Druid
-			{ ":Halvor.6610",   "Halvor Stane",    2, 61 }, // Warrior / Berserker
+			{ ":Kalden.5076",   "Kalden Roth",     6, 80 }, // Elementalist / Evoker
+			{ ":Maryth.2081",   "Maryth Solane",   6, 56 }, // Elementalist / Weaver
+			{ ":Orrin.9143",    "Orrin Kade",      7, 59 }, // Mesmer / Mirage
+			{ ":Brisa.3388",    "Brisa Thornwood", 4, 55 }, // Ranger / Soulbeast
+			{ ":Halvor.6610",   "Halvor Stane",    2, 61 }, // Warrior / Spellbreaker
 			{ ":Nessa.1174",    "Nessa Grimm",     8, 34 }, // Necromancer / Reaper
 			{ ":Edric.7752",    "Edric Lumen",     1, 62 }, // Guardian / Firebrand
-			{ ":Tamsin.5519",   "Tamsin Ward",     4, 72 }, // Ranger / Soulbeast
+			{ ":Tamsin.5519",   "Tamsin Ward",     4, 5 },  // Ranger / Druid
 		};
 
 		constexpr size_t kSelfIndex = 3; // we play Orrin Kade, 4th in the order
@@ -418,6 +418,14 @@ namespace Shots
 					Rezz::SessionView view = NinePlayers();
 					view.Precast = { Account(1), Account(4) };
 					return view;
+				}, Scenario::Window::Editor });
+			// Building a new order: the squad column in subgroup order, and the spec picker for adding a whole
+			// spec at once. Two druids and two mesmers left over, in different subgroups.
+			list.push_back({ "editor-new-order", "the order editor while building an order, squad sorted by subgroup",
+				[](Settings::Values&) {}, [] {
+					Squad squad = Base(9);
+					squad.Order({ Account(5), Account(6) });
+					return squad.View();
 				}, Scenario::Window::Editor });
 			return list;
 		}

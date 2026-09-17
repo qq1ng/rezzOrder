@@ -1,5 +1,6 @@
 #include "Live.h"
 
+#include <algorithm>
 #include <cstring>
 #include <mutex>
 
@@ -81,6 +82,12 @@ namespace Live
 		s_Session.SetShareRules(aFromLeaders, aFromAnyone);
 	}
 
+	void SetSubstitutes(bool aEnabled)
+	{
+		std::scoped_lock lock(s_Mutex);
+		s_Session.SetSubstitutes(aEnabled);
+	}
+
 	void SetAnswerRule(int aRule)
 	{
 		std::scoped_lock lock(s_Mutex);
@@ -116,6 +123,12 @@ namespace Live
 	{
 		std::scoped_lock lock(s_Mutex);
 		s_Session.SetOrder(aAccounts);
+	}
+
+	void SetBench(int aSubgroup)
+	{
+		std::scoped_lock lock(s_Mutex);
+		s_Session.SetBench(static_cast<uint16_t>(std::clamp(aSubgroup, 0, 255)));
 	}
 
 	void SetPrecast(const std::vector<std::string>& aAccounts)

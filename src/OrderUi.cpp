@@ -273,7 +273,7 @@ namespace OrderUi
 			ApplyOrder(std::move(aOrder));
 		}
 
-		// Squad members with a revive profession who aren't in the order yet.
+		// Squad members with a revive profession who aren't in the order yet, in subgroup order (unknown last).
 		std::vector<const Rezz::RosterMember*> Candidates(const Rezz::SessionView& aView, bool aAllProfessions)
 		{
 			std::vector<const Rezz::RosterMember*> candidates;
@@ -285,7 +285,32 @@ namespace OrderUi
 				if (!revive && !aAllProfessions) { continue; }
 				candidates.push_back(&member);
 			}
+			// Stable: within a subgroup the roster's own order (revive professions first, then by name) stays.
+			auto group = [](const Rezz::RosterMember* aMember) { return aMember->Subgroup == 0 ? 1000 : static_cast<int>(aMember->Subgroup); };
+			std::stable_sort(candidates.begin(), candidates.end(),
+				[&](const Rezz::RosterMember* a, const Rezz::RosterMember* b) { return group(a) < group(b); });
 			return candidates;
+		}
+
+		// The elite specialization's name, or the profession's for a core build. Ids from the GW2 API.
+		const char* SpecName(uint32_t aProfession, uint32_t aElite)
+		{
+			switch (aElite)
+			{
+				case 5:  return "Druid";         case 55: return "Soulbeast";    case 72: return "Untamed";      case 78: return "Galeshot";
+				case 18: return "Berserker";     case 61: return "Spellbreaker"; case 68: return "Bladesworn";   case 74: return "Paragon";
+				case 27: return "Dragonhunter";  case 62: return "Firebrand";    case 65: return "Willbender";   case 81: return "Luminary";
+				case 40: return "Chronomancer";  case 59: return "Mirage";       case 66: return "Virtuoso";     case 73: return "Troubadour";
+				case 48: return "Tempest";       case 56: return "Weaver";       case 67: return "Catalyst";     case 80: return "Evoker";
+				case 34: return "Reaper";        case 60: return "Scourge";      case 64: return "Harbinger";    case 76: return "Ritualist";
+				case 43: return "Scrapper";      case 57: return "Holosmith";    case 70: return "Mechanist";    case 75: return "Amalgam";
+				case 7:  return "Daredevil";     case 58: return "Deadeye";      case 71: return "Specter";      case 77: return "Antiquary";
+				case 52: return "Herald";        case 63: return "Renegade";     case 69: return "Vindicator";   case 79: return "Conduit";
+				default: break;
+			}
+			static constexpr const char* kCore[] = { "Unknown", "Guardian", "Warrior", "Engineer", "Ranger", "Thief",
+				"Elementalist", "Mesmer", "Necromancer", "Revenant" };
+			return aProfession < std::size(kCore) ? kCore[aProfession] : "Unknown";
 		}
 
 		// A menu entry with the profession icon drawn into the space the label leaves free.
@@ -378,7 +403,8 @@ namespace OrderUi
 				AddNotice("no order to share yet", s_LastNowMs);
 				return;
 			}
-			std::string line = Rezz::Share::Encode(aOrder, Settings::Current.Precast, aRoster);
+			std::string line = Rezz::Share::Encode(aOrder, Settings::Current.Precast, aRoster,
+				static_cast<uint16_t>(Settings::Current.Bench));
 			ImGui::SetClipboardText(line.c_str());
 			AddNotice("copied: " + line + " - paste it in squad chat", s_LastNowMs);
 			Live::ClearRequest();
@@ -1733,14 +1759,55 @@ namespace OrderUi
 				ApplyOrder(order);
 			}
 
+			// One spec at a time, in subgroup order: the troubadour in subgroup 2 goes before the one in 4.
+			struct Spec { uint32_t Profession; uint32_t Elite; std::string Name; int Count; };
+			std::vector<Spec> specs;
+			for (const Rezz::RosterMember* member : candidates)
+			{
+				if (member->Profession == 0) { continue; } // not on our map: nothing known to group them by
+				auto it = std::find_if(specs.begin(), specs.end(),
+					[&](const Spec& aSpec) { return aSpec.Profession == member->Profession && aSpec.Elite == member->Elite; });
+				if (it != specs.end()) { it->Count++; continue; }
+				specs.push_back(Spec{ member->Profession, member->Elite, SpecName(member->Profession, member->Elite), 1 });
+			}
+			std::sort(specs.begin(), specs.end(), [](const Spec& a, const Spec& b) { return a.Name < b.Name; });
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(ImGui::CalcTextSize("Add in subgroup order").x + ImGui::GetFrameHeight() * 2);
+			if (ImGui::BeginCombo("##add_spec", "Add in subgroup order", ImGuiComboFlags_HeightLarge))
+			{
+				if (specs.empty()) { ImGui::TextColored(kGrey, "Nobody left to add"); }
+				for (const Spec& spec : specs)
+				{
+					std::string label = spec.Name + " (" + std::to_string(spec.Count) + ")##" +
+						std::to_string(spec.Profession) + "_" + std::to_string(spec.Elite);
+					if (ImGui::Selectable(label.c_str()))
+					{
+						std::vector<std::string> order = aView.Order;
+						for (const Rezz::RosterMember* member : candidates)
+						{
+							if (member->Profession == spec.Profession && member->Elite == spec.Elite) { order.push_back(member->Account); }
+						}
+						ApplyOrder(order);
+					}
+				}
+				ImGui::EndCombo();
+			}
+
 			ImGui::BeginChild("squad_list", ImVec2(0, 0), true);
 			if (candidates.empty())
 			{
 				ImGui::TextColored(kGrey, "Nobody to add. Squad members on your map");
 				ImGui::TextColored(kGrey, "appear here (needs ArcDPS).");
 			}
+			uint16_t shownGroup = 0xFFFF;
 			for (const Rezz::RosterMember* member : candidates)
 			{
+				if (member->Subgroup != shownGroup)
+				{
+					shownGroup = member->Subgroup;
+					if (shownGroup == 0) { ImGui::TextColored(kGrey, "No subgroup"); }
+					else { ImGui::TextColored(kGrey, "Subgroup %u", static_cast<unsigned>(shownGroup)); }
+				}
 				ImGui::PushID(member->Account.c_str());
 				if (ImGui::SmallButton("+"))
 				{
@@ -1774,6 +1841,40 @@ namespace OrderUi
 			ImGui::TextColored(kGrey, "(drag a row to reorder)");
 
 			ImGui::TextColored(kGrey, "The backup is whoever is ready next after the player who is up.");
+
+			// Part of the order, and shared with it, so every client agrees on which subgroup is the bench.
+			ImGui::AlignTextToFramePadding();
+			ImGui::TextUnformatted("Bench subgroup");
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(ImGui::CalcTextSize("none").x + ImGui::GetFrameHeight() * 2);
+			std::string benchLabel = Rezz::Share::BenchName(aView.Bench);
+			if (ImGui::BeginCombo("##bench", benchLabel.c_str()))
+			{
+				// "last" follows the squad as it fills up; 1 is the first subgroup.
+				static constexpr int kChoices[] = { 0, Rezz::Share::kBenchLast, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
+				for (int group : kChoices)
+				{
+					std::string label = Rezz::Share::BenchName(static_cast<uint16_t>(group));
+					if (ImGui::Selectable(label.c_str(), group == aView.Bench))
+					{
+						if (Rezz::Demo::Running()) { AddNotice("demo squad: stop the demo to change the real order", s_LastNowMs); }
+						else
+						{
+							Settings::Current.Bench = group;
+							Live::SetBench(group);
+							Settings::MarkDirty();
+						}
+					}
+				}
+				ImGui::EndCombo();
+			}
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip("Moving a player from the order into this subgroup takes them out, and whoever moves into\n"
+					"the subgroup they left takes their place. \"last\" is the highest subgroup in use, and follows the\n"
+					"squad as it fills up. A subgroup with anybody from the order in it is never the bench.\n"
+					"Copied into squad chat with the order.");
+			}
 
 			std::vector<std::string> order = aView.Order;
 			bool changed = false;
@@ -1912,7 +2013,7 @@ namespace OrderUi
 			if (ImGui::Button("Copy for squad chat")) { CopyOrder(aView); }
 			if (ImGui::IsItemHovered())
 			{
-				ImGui::SetTooltip("%s", Rezz::Share::Encode(aView.Order, aView.Precast, aView.Roster).c_str());
+				ImGui::SetTooltip("%s", Rezz::Share::Encode(aView.Order, aView.Precast, aView.Roster, aView.Bench).c_str());
 			}
 			ImGui::SameLine();
 			if (ImGui::Button("Clear order")) { ImGui::OpenPopup("clear_order"); }
@@ -2031,7 +2132,7 @@ namespace OrderUi
 						ImGui::TextColored(kRed, "(%s has no revive skill)", Rezz::ProfessionShortName(asker->Profession));
 					}
 				}
-				ImGui::TextColored(kGrey, "%s", Rezz::Share::Encode(withThem, aView.Precast, aView.Roster).c_str());
+				ImGui::TextColored(kGrey, "%s", Rezz::Share::Encode(withThem, aView.Precast, aView.Roster, aView.Bench).c_str());
 
 				if (inOrder)
 				{
@@ -2108,8 +2209,10 @@ namespace OrderUi
 	{
 		Live::SetOrder(Settings::Current.Order);
 		Live::SetPrecast(Settings::Current.Precast);
+		Live::SetBench(Settings::Current.Bench);
 		Live::SetShareRules(Settings::Current.ShareFromLeaders, Settings::Current.ShareFromAnyone);
 		Live::SetAnswerRule(Settings::Current.AnswerRequests);
+		Live::SetSubstitutes(Settings::Current.Substitutes);
 	}
 
 	void AddNotice(const std::string& aText, unsigned aNowMs)
@@ -2223,10 +2326,12 @@ namespace OrderUi
 		{ Timing::Step step("session view"); live = Live::GetView(); }
 		// Demo mode shows a squad that isn't there; the real order must not be touched while it runs.
 		Rezz::SessionView view = Rezz::Demo::Running() ? Rezz::Demo::View(aContext.NowMs) : live;
-		if (!Rezz::Demo::Running() && (view.Order != Settings::Current.Order || view.Precast != Settings::Current.Precast))
+		if (!Rezz::Demo::Running() && (view.Order != Settings::Current.Order || view.Precast != Settings::Current.Precast ||
+			view.Bench != Settings::Current.Bench))
 		{
 			Settings::Current.Order = view.Order;
 			Settings::Current.Precast = view.Precast;
+			Settings::Current.Bench = view.Bench;
 			Settings::MarkDirty();
 		}
 		if (CopyOrderRequested.exchange(false)) { CopyOrder(view); }
@@ -2400,7 +2505,7 @@ namespace OrderUi
 		ImGui::TextUnformatted("Notifications");
 		ImGui::TextColored(kGrey, "Every message is shown next to the turn window. These pick the ones that also get a");
 		ImGui::TextColored(kGrey, "banner across the top of the screen.");
-		BannerToggle("a player in the order leaves", &s.BannerOnLeave,
+		BannerToggle("a player in the order leaves or is replaced", &s.BannerOnLeave,
 			"\"3. PlayerXYZ left the squad - you are up now\"");
 		BannerToggle("a player swaps profession", &s.BannerOnSwap,
 			"\"3. PlayerXYZ swapped to Ranger (no revive skill)\"");
@@ -2527,6 +2632,17 @@ namespace OrderUi
 		{
 			s_IllusionPreviews.push_back(s_LastNowMs + static_cast<unsigned>(std::clamp(s.IllusionWarnSeconds, 1, 14)) * 1000);
 		}
+
+		ImGui::Separator();
+		ImGui::TextUnformatted("Bench swaps");
+		if (ImGui::Checkbox("Somebody moved into a benched player's subgroup takes their place", &s.Substitutes))
+		{
+			Settings::MarkDirty();
+			Live::SetSubstitutes(s.Substitutes);
+		}
+		ImGui::TextColored(kGrey, "Set the bench subgroup in the order editor; it is shared with the order. Moving a player from");
+		ImGui::TextColored(kGrey, "the order into it takes them out, and a druid, troubadour or anyone seen reviving who moves into");
+		ImGui::TextColored(kGrey, "the subgroup they left within 2 minutes takes their place. Needs Unofficial Extras.");
 
 		ImGui::Separator();
 		ImGui::TextUnformatted("Sharing the order in squad chat");

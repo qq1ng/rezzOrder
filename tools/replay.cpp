@@ -406,7 +406,10 @@ namespace
 			}
 			else if (kind == "UE_SQUAD")
 			{
-				session.OnRole(row["src_name"], ParseRole(row["detail"]), 0, now);
+				const std::string& detail = row["detail"];
+				size_t at = detail.find("subgroup=");
+				uint16_t subgroup = at == std::string::npos ? 0 : static_cast<uint16_t>(std::atoi(detail.c_str() + at + 9));
+				session.OnRole(row["src_name"], ParseRole(detail), subgroup, now);
 			}
 			else if (kind == "ARC" && row["channel"] == "SQUAD")
 			{
