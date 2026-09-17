@@ -252,6 +252,10 @@ namespace
 
 int main(int argc, char** argv)
 {
+	// The scenarios drive the real notification code, and every alert in them would otherwise be played on
+	// the machine rendering the shots.
+	Notify::SetSilent(true);
+
 	std::string outDir = "docs/shots";
 	std::string only;
 	std::string font = "C:/Windows/Fonts/segoeui.ttf";

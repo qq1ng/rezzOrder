@@ -33,6 +33,7 @@ namespace Notify
 
 		// PlaySound reads the buffer while it plays, so the bytes have to outlive the call.
 		std::vector<unsigned char> s_Playing;
+		bool s_Silent = false; // set by the test renderer and the unit tests
 
 		void Append(std::vector<unsigned char>& aOut, const void* aData, size_t aSize)
 		{
@@ -202,9 +203,15 @@ namespace Notify
 		s_Playing.clear();
 	}
 
+	void SetSilent(bool aSilent)
+	{
+		s_Silent = aSilent;
+		if (aSilent) { PlaySoundW(nullptr, nullptr, 0); }
+	}
+
 	void Play(Sound aSound)
 	{
-		if (aSound == Sound::None) { return; }
+		if (aSound == Sound::None || s_Silent) { return; }
 		float gain = std::clamp(Settings::Current.SoundVolume / 100.0f, 0.0f, 1.0f);
 		if (gain <= 0.0f) { return; }
 

@@ -2236,6 +2236,10 @@ namespace OrderUi
 
 		std::vector<unsigned> s_IllusionPreviews; // when each "try" from the options page runs out
 		std::vector<unsigned> s_IllusionAlerted;  // when the countdowns that got their sound and flash run out
+		// Who a countdown is on screen for. A player who rallies drops out of it at once, so without saying so
+		// the sound and flash of a countdown that lasted a moment have nothing to show for them (field test
+		// 2026-09-17: rallied 0.8 s after their countdown started).
+		std::vector<std::pair<std::string, unsigned>> s_IllusionShown;
 
 		// Somebody revived by Illusion of Life goes down again when it runs out, unless they kill something first.
 		// In its last seconds a banner names them, for whoever could revive them again: only a player whose own
@@ -2246,6 +2250,24 @@ namespace OrderUi
 			constexpr unsigned kSameCastMs = 500; // players whose Illusion runs out this close together share one cast
 			constexpr size_t   kMostShown  = 3;
 			std::erase_if(s_IllusionPreviews, [aNowMs](unsigned aEnd) { return aEnd <= aNowMs; });
+			// Gone from the countdown before it ran out: they got up, which is the good ending.
+			std::erase_if(s_IllusionShown, [&](const std::pair<std::string, unsigned>& aShown)
+			{
+				bool stillUnderIt = std::any_of(aView.Illusions.begin(), aView.Illusions.end(),
+					[&](const Rezz::IllusionTarget& aTarget) { return aTarget.Account == aShown.first; });
+				if (stillUnderIt) { return false; }
+				// Within a moment of the end it simply ran out, and they went down: nothing to say.
+				bool ranOut = aShown.second <= aNowMs + 300;
+				// Somebody else from the same cast is still on the clock, so the countdown carries on with their
+				// name on it. That is the answer to the sound already, and a rally message would only cover it.
+				bool castGoesOn = std::any_of(aView.Illusions.begin(), aView.Illusions.end(), [&](const Rezz::IllusionTarget& aTarget)
+				{
+					unsigned ends = aNowMs + static_cast<unsigned>(aTarget.EndsInMs);
+					return (ends > aShown.second ? ends - aShown.second : aShown.second - ends) <= kSameCastMs;
+				});
+				if (!ranOut && !castGoesOn) { AddNotice("Rally", aNowMs); }
+				return true;
+			});
 			std::erase_if(s_IllusionAlerted, [aNowMs](unsigned aEnd) { return aEnd + 1000 <= aNowMs; });
 
 			struct Pending
@@ -2300,6 +2322,14 @@ namespace OrderUi
 				}
 				Banner::Countdown(static_cast<unsigned>((soonest + 999) / 1000), names);
 				shown++;
+				for (const Rezz::IllusionTarget& target : aView.Illusions)
+				{
+					if (target.EndsInMs > soonest + kSameCastMs) { continue; }
+					auto known = std::find_if(s_IllusionShown.begin(), s_IllusionShown.end(),
+						[&](const std::pair<std::string, unsigned>& aShown) { return aShown.first == target.Account; });
+					if (known == s_IllusionShown.end()) { s_IllusionShown.emplace_back(target.Account, endsAt); }
+					else { known->second = endsAt; }
+				}
 			}
 		}
 	}
@@ -2307,6 +2337,7 @@ namespace OrderUi
 	void ClearNotices()
 	{
 		s_Notices.clear();
+		s_IllusionShown.clear();
 	}
 
 	void Render(const Context& aContext)

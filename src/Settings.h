@@ -65,10 +65,12 @@ namespace Settings
 		bool  BannerOnAsk    = false;           // somebody asks the squad for the order
 
 		// --- The turn reaching us. Three signals, each switchable for "up" and for "backup" on its own.
-		bool  UpBanner       = false;
-		bool  BackupBanner   = false;
-		int   UpSound        = 0;               // Notify::Sound
-		int   BackupSound    = 0;
+		// On out of the box: the whole point of the addon is not having to watch the window. Anyone who already
+		// has a settings.txt keeps whatever they set.
+		bool  UpBanner       = true;
+		bool  BackupBanner   = true;
+		int   UpSound        = 1;               // Notify::Sound::SoftChime
+		int   BackupSound    = 11;              // Notify::Sound::Pluck, quieter than the one for your own turn
 		int   SoundVolume    = 60;              // 0-100
 		std::string SoundFile;                  // used when a sound is set to "file..."
 		bool  UpFlash        = true;            // a coloured pulse along the edges of the screen

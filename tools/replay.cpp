@@ -28,7 +28,10 @@
 #include <map>
 #include <sstream>
 
+#include <cstdlib>
+
 #include "Capture.h"
+#include "Share.h"
 #include "Session.h"
 #include "ReviveSkills.h"
 #include "Tracker.h"
@@ -367,6 +370,8 @@ namespace
 
 		Rezz::Session session;
 		session.SetOrder(order);
+		// The bench setting normally arrives with a shared order; a replay sets it from REZZ_BENCH.
+		if (const char* bench = std::getenv("REZZ_BENCH")) { session.SetBench(Rezz::Share::BenchFromName(bench)); }
 
 		// A recording started after the squad formed has no join rows for its members, only the periodic SEEN rows
 		// the recorder writes for everyone it knows. Those are enough to put them in the roster up front.
@@ -381,12 +386,15 @@ namespace
 			update.Id = row.U("src_id");
 			update.Added = 1;
 			update.Self = static_cast<uint32_t>(row.U("src_self"));
+			update.Profession = static_cast<uint32_t>(row.U("src_prof"));
+			update.Elite = static_cast<uint32_t>(row.U("src_elite"));
 			session.OnAgentUpdate(update, 0);
 		}
 
 		uint64_t lastPrint = 0;
 		size_t notices = 0;
 		std::string lastIllusions;
+		std::string lastTurn;
 		for (const Row& row : rows)
 		{
 			const std::string& kind = row["kind"];
@@ -458,6 +466,23 @@ namespace
 						static_cast<unsigned long long>(target.EndsInMs));
 				}
 				lastIllusions = state;
+			}
+			// Every change of the turn, with each player's state: for tracing a turn that stayed where it was.
+			{
+				Rezz::SessionView view = session.GetView(now);
+				std::string turn;
+				for (int i = 0; i < static_cast<int>(view.Turn.Rows.size()); i++)
+				{
+					const Rezz::OrderRow& orderRow = view.Turn.Rows[i];
+					turn += " " + std::string(i == view.Turn.UpIndex ? ">" : (i == view.BackupIndex ? "b" : "")) +
+						Rezz::DisplayAccount(orderRow.Account).substr(0, 8) + "=" +
+						(orderRow.Status == Rezz::Eligibility::Cooldown ? "cd" : EligibilityName(orderRow.Status));
+				}
+				if (turn != lastTurn)
+				{
+					std::printf("%10llu  TURN   %s\n", now, turn.c_str());
+					lastTurn = turn;
+				}
 			}
 			if (now >= lastPrint + 5 * 60 * 1000)
 			{

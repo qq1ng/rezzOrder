@@ -273,7 +273,10 @@ namespace Rezz
 				{
 					m_IllusionApplySeen = true;
 					uint64_t length = ev.Value > 0 ? static_cast<uint64_t>(ev.Value) : 15000;
-					m_Illusions[account] = IllusionState{ ev.Time + length, ResolveAccount(srcId, ev.SrcInstId) };
+					std::string caster = ResolveAccount(srcId, ev.SrcInstId);
+					m_Illusions[account] = IllusionState{ ev.Time + length, caster };
+					// The effect landed, so the skill was spent even if its cast was reported as cancelled.
+					m_Tracker.MarkUsed(ev.Time, caster, ReviveGroup::IllusionOfLife);
 					return;
 				}
 
@@ -446,7 +449,7 @@ namespace Rezz
 				}
 				else if (!ReclaimPlace(aAccount, aNowMs, aSubgroup))
 				{
-					m_Arrivals.push_back(Arrival{ aAccount, aSubgroup, aNowMs });
+					m_Arrivals.push_back(Arrival{ aAccount, aSubgroup, aNowMs, IsBench(previousGroup, aAccount) });
 				}
 				MatchSubstitutes(aNowMs);
 			}
@@ -618,21 +621,38 @@ namespace Rezz
 		{
 			const Vacancy vacancy = m_Vacancies[i];
 
+			auto sure = [this](const std::string& aAccount)
+			{
+				auto member = m_Roster.find(aAccount);
+				// On the wrong character, or not on our map yet: waits, and counts once that changes.
+				return member != m_Roster.end() && SureReviver(member->second);
+			};
 			std::vector<std::string> candidates;
 			for (const Arrival& arrival : m_Arrivals)
 			{
 				if (arrival.Subgroup != vacancy.Subgroup || SubgroupOf(arrival.Account) != vacancy.Subgroup ||
-					InOrder(arrival.Account)) { continue; }
-				auto member = m_Roster.find(arrival.Account);
-				// On the wrong character, or not on our map yet: waits, and counts once that changes.
-				if (member != m_Roster.end() && SureReviver(member->second)) { candidates.push_back(arrival.Account); }
+					InOrder(arrival.Account) || !sure(arrival.Account)) { continue; }
+				candidates.push_back(arrival.Account);
+			}
+			// Nobody moved into the subgroup this place was left from: in a rotation of three or more the
+			// substitute lands somewhere else entirely, and all that marks them is coming off the bench.
+			bool offBench = candidates.empty();
+			if (offBench)
+			{
+				for (const Arrival& arrival : m_Arrivals)
+				{
+					if (!arrival.FromBench || InOrder(arrival.Account) || !sure(arrival.Account)) { continue; }
+					candidates.push_back(arrival.Account);
+				}
 			}
 			if (candidates.empty()) { i++; continue; }
 
+			// Places waiting for the same candidates: the ones left from this subgroup, or every open place
+			// when the match is by coming off the bench.
 			int holes = 0, sameHoles = 0;
 			for (const Vacancy& other : m_Vacancies)
 			{
-				if (other.Subgroup != vacancy.Subgroup) { continue; }
+				if (!offBench && other.Subgroup != vacancy.Subgroup) { continue; }
 				holes++;
 				if (other.Profession == vacancy.Profession) { sameHoles++; }
 			}
@@ -655,12 +675,13 @@ namespace Rezz
 					std::string names;
 					for (const Vacancy& other : m_Vacancies)
 					{
-						if (other.Subgroup == group) { names += (names.empty() ? "" : ", ") + DisplayAccount(other.Account); }
+						if (offBench || other.Subgroup == group) { names += (names.empty() ? "" : ", ") + DisplayAccount(other.Account); }
 					}
-					Notify(NoticeKind::Substituted, vacancy.Account, "Can't tell who replaces " + names + " (subgroup " +
-						std::to_string(group) + "), add them by hand");
-					std::erase_if(m_Vacancies, [group](const Vacancy& aOther) { return aOther.Subgroup == group; });
-					std::erase_if(m_Arrivals, [group](const Arrival& aOther) { return aOther.Subgroup == group; });
+					Notify(NoticeKind::Substituted, vacancy.Account, "Can't tell who replaces " + names +
+						", add them by hand");
+					bool all = offBench;
+					std::erase_if(m_Vacancies, [group, all](const Vacancy& aOther) { return all || aOther.Subgroup == group; });
+					std::erase_if(m_Arrivals, [group, all](const Arrival& aOther) { return all || aOther.Subgroup == group; });
 					i = 0;
 					continue;
 				}
@@ -822,7 +843,10 @@ namespace Rezz
 	{
 		Share::Message message = Share::Parse(aText);
 		if (message.What == Share::Kind::None) { return; }
-		if (!aAccount.empty() && aAccount == m_SelfAccount) { return; } // our own paste
+		// Our own paste: normally the order it names is already ours, but it may have been typed by hand or
+		// pasted from somewhere else, and then this is how we get it (field test 2026-09-17).
+		bool ours = !aAccount.empty() && aAccount == m_SelfAccount;
+		if (ours && message.What == Share::Kind::Request) { return; }
 
 		std::string name = DisplayAccount(aAccount);
 		if (message.What == Share::Kind::Request)
@@ -847,6 +871,18 @@ namespace Rezz
 		for (const auto& [account, member] : m_Roster) { roster.push_back(member); }
 		Share::Resolved resolved = Share::Resolve(message.Entries, roster);
 		if (resolved.Accounts.empty()) { return; }
+
+		if (ours)
+		{
+			if (resolved.Accounts == m_Tracker.Order() && resolved.Precast == m_Precast && message.Bench == m_BenchGroup) { return; }
+			int before = SelfPlace();
+			SetOrder(resolved.Accounts);
+			SetPrecast(resolved.Precast);
+			SetBench(message.Bench);
+			Notify(NoticeKind::ShareApplied, m_SelfAccount, "using the revive order you pasted (" +
+				std::to_string(resolved.Accounts.size()) + " players)" + PlaceChange(before));
+			return;
+		}
 
 		SquadRole role = SquadRole::Unknown;
 		if (auto it = m_Roster.find(aAccount); it != m_Roster.end()) { role = it->second.Role; }

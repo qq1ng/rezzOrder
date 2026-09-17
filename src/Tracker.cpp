@@ -136,6 +136,31 @@ namespace Rezz
 		if (info->Group != ReviveGroup::SpiritOfNature) { AddRevive(aTimeMs, aAccount, *info); }
 	}
 
+	void Tracker::MarkUsed(uint64_t aTimeMs, const std::string& aAccount, ReviveGroup aGroup)
+	{
+		if (aAccount.empty() || aGroup == ReviveGroup::Count) { return; }
+		// The effect of a cast that was already counted, arriving a moment later: nothing new to record.
+		constexpr uint64_t kAlreadyCountedMs = 5 * 1000;
+		PlayerStatus& player = GetPlayer(aAccount);
+		SkillStatus& skill = GetSkill(player, aGroup);
+		if (skill.LastUsedMs != 0 && aTimeMs < skill.LastUsedMs + kAlreadyCountedMs) { return; }
+
+		bool wasUp = false;
+		if (std::find(m_Order.begin(), m_Order.end(), aAccount) != m_Order.end())
+		{
+			TurnView before = GetTurn(aTimeMs);
+			wasUp = before.UpIndex >= 0 && before.Rows[before.UpIndex].Account == aAccount;
+		}
+		if (skill.State == SkillState::Casting) { skill.Cancels = skill.Cancels > 0 ? skill.Cancels - 1 : 0; }
+		skill.Uses++;
+		skill.Confirmed = true;
+		skill.LastUsedMs = aTimeMs;
+		skill.ReadyAtMs = aTimeMs + GetGroupInfo(aGroup).WvwRechargeS * 1000ull;
+		skill.State = SkillState::Cooldown;
+		skill.LastRevived = 0;
+		if (wasUp) { m_LastOrderedUser = aAccount; }
+	}
+
 	void Tracker::OnOwnedEffect(uint64_t aTimeMs, const std::string& aOwnerAccount, uint32_t aSkillId)
 	{
 		const ReviveSkill* info = FindReviveSkill(aSkillId);

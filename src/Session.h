@@ -170,6 +170,9 @@ namespace Rezz
 		//   - Leaving the squad, or swapping to a character that isn't a sure reviver, takes them out too.
 		//   - The place stays open for kSubstituteWindowMs. A sure reviver who moves (not joins) into the subgroup
 		//     it was left from takes it; the player who left it gets it back by returning.
+		//   - Squads rotate three or more players at once (field log 2026-09-17: off the bench into subgroup 1,
+		//     subgroup 1 into 2, subgroup 2 to the bench), so the one coming in rarely lands in the subgroup that
+		//     was left. Failing a match by subgroup, a lone sure reviver who came off the bench takes the place.
 		//   - A sure reviver is a druid or a troubadour, or anyone seen using a revive skill on this character:
 		//     not every warrior carries Battle Standard.
 		//   - A player in the order swapping to a sure reviver keeps their place.
@@ -288,8 +291,9 @@ namespace Rezz
 		struct Arrival
 		{
 			std::string Account;
-			uint16_t    Subgroup = 0;
-			uint64_t    TimeMs   = 0;
+			uint16_t    Subgroup  = 0;
+			uint64_t    TimeMs    = 0;
+			bool        FromBench = false; // came off the bench, so they are somebody's substitute wherever they land
 		};
 		std::deque<Vacancy>                           m_Vacancies;
 		std::deque<Arrival>                           m_Arrivals;

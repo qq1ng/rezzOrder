@@ -111,6 +111,10 @@ namespace Rezz
 		void ForgetSkills(const std::string& aAccount);
 		// We are watching this player from now on (squad join, or back on our map).
 		void MarkSeenSince(uint64_t aTimeMs, const std::string& aAccount);
+		// The skill's effect was seen, so it was spent whatever the cast events said. In the field log of
+		// 2026-09-17 arcdps reported an Illusion of Life as cancelled after 37 ms and the revive landed a second
+		// later: without this the caster keeps their turn while their skill is recharging.
+		void MarkUsed(uint64_t aTimeMs, const std::string& aAccount, ReviveGroup aGroup);
 		// A signet passive tells us the signet is off cooldown right now.
 		void MarkSkillReady(uint64_t aTimeMs, const std::string& aAccount, ReviveGroup aGroup);
 

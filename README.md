@@ -4,6 +4,9 @@ A Guild Wars 2 addon for WvW squads with a set revive tool order. It watches eve
 skills and shows whose turn it is, so two people don't burn an Illu and Spirit on the
 same downed player.
 
+**[Discord server](https://discord.gg/fufbGGGuXv)** for questions, bug reports and new versions. DM **exoqqen**
+for questions.
+
 ![What it does](docs/images/banner.gif)
 
 
@@ -56,35 +59,6 @@ instant revive are listed unless you tick *all professions*.
 Leaving the squad or swapping to another character takes that player out of the order by itself, and
 everybody still in it keeps their turn. Moving to another map does not: they show as `away` and are skipped
 until they are back.
-
-### Bench swaps
-
-Squads that rotate players in and out don't have to touch the order. Pick the **bench subgroup** in the order
-editor: *last* (the highest subgroup in use, which follows the squad as it fills up), or a fixed number such as 1.
-It is part of the order and goes into squad chat with it (`... > ted* > bench:last`), so everyone uses the same
-one. Then swap people in the squad window as usual:
-
-1. Move the player going out to the bench. They leave the order at once.
-2. Move the player coming in to the subgroup they left, within 2 minutes.
-
-The newcomer takes their exact place, `*` mark and turn included, on every client. The two moves can come in
-either order.
-
-- Only a druid, a troubadour, or somebody the addon has seen use a revive skill can take a place: not every
-  warrior carries Battle Standard. Moved in on the wrong character, they get it once they swap.
-- Moving somebody between the fighting subgroups changes nothing, even into a subgroup with nobody from the order.
-- A subgroup with anybody from the order in it is never the bench, so a night without a bench, where the last
-  subgroup is a fighting group, is safe as long as somebody from the order is in it.
-- With *last*, an empty subgroup past the last one in use is a new group being built, not the bench.
-- Dragged to the bench by mistake? Move them back within 2 minutes and they have their place again.
-- A player leaving the squad, or swapping to a character without a sure revive, leaves their place open the same
-  way. Rejoining or swapping back within 2 minutes gives it back. A druid or troubadour swapping to another
-  druid or troubadour keeps it.
-- Several swaps in one subgroup are matched by profession. If that still can't tell them apart, the places stay
-  empty and a message says to add them by hand.
-- Without a bench subgroup set, nobody is benched.
-
-Nexus options, *Bench swaps*. On by default.
 
 ### Customizable
 
@@ -148,6 +122,35 @@ Their popup names the asking person and offers *Copy it for squad chat*. If you 
 usual reason for asking, the first button instead reads *Add playerXYZ and copy*, which puts you at the end and
 copies the line in one click.
 
+### Bench swaps
+
+Squads that rotate players in and out don't have to touch the order. Pick the **bench subgroup** in the order
+editor: *last* (the highest subgroup in use, which follows the squad as it fills up), or a fixed number such as 1.
+It is part of the order and goes into squad chat with it (`... > ted* > bench:last`), so everyone uses the same
+one. Then swap people in the squad window as usual:
+
+1. Move the player going out to the bench. They leave the order at once.
+2. Move the player coming in to the subgroup they left, within 2 minutes.
+
+The newcomer takes their exact place, `*` mark and turn included, on every client. The two moves can come in
+either order.
+
+- Only a druid, a troubadour, or somebody the addon has seen use a revive skill can take a place: not every
+  warrior carries Battle Standard. Moved in on the wrong character, they get it once they swap.
+- Moving somebody between the fighting subgroups changes nothing, even into a subgroup with nobody from the order.
+- A subgroup with anybody from the order in it is never the bench, so a night without a bench, where the last
+  subgroup is a fighting group, is safe as long as somebody from the order is in it.
+- With *last*, an empty subgroup past the last one in use is a new group being built, not the bench.
+- Dragged to the bench by mistake? Move them back within 2 minutes and they have their place again.
+- A player leaving the squad, or swapping to a character without a sure revive, leaves their place open the same
+  way. Rejoining or swapping back within 2 minutes gives it back. A druid or troubadour swapping to another
+  druid or troubadour keeps it.
+- Several swaps in one subgroup are matched by profession. If that still can't tell them apart, the places stay
+  empty and a message says to add them by hand.
+- Without a bench subgroup set, nobody is benched.
+
+Nexus options, *Bench swaps*. On by default.
+
 ### Precast players
 
 A `*` after a name marks a **precast** player: somebody who uses their revivetool when they see a fight going
@@ -192,6 +195,29 @@ Two things run without starting the game:
 Some source comments point at write-ups under `notes/`: the measurement results, phase plans and the
 roadmap. Those are working notes rather than documentation, and they are not published with the repo.
 
+## Built on
+
+- **[Nexus](https://raidcore.gg/Nexus)** by Raidcore, the addon loader this runs in, and its
+  [addon API](https://github.com/RaidcoreGG/Nexus-API) (MIT). **ArcDPS Integration**, also Raidcore, is what
+  passes ArcDPS' combat events to other addons, and **[RTAPI](https://github.com/RaidcoreGG/GW2-RealTime-API-Releases)**
+  documents the real-time data Nexus addons can read.
+- **[ArcDPS](https://www.deltaconnected.com/arcdps/)** by deltaconnected. Every cast, down, rally and death this
+  addon reacts to comes from it, and its evtc documentation is what the event handling was written against.
+- **[Unofficial Extras](https://github.com/Krappa322/arcdps_unofficial_extras_releases)** by Krappa322 (MIT):
+  squad roles, subgroups, instant leave notices and the squad chat messages used for sharing the order.
+- **[Dear ImGui](https://github.com/ocornut/imgui)** by Omar Cornut (MIT), through Raidcore's
+  [fork](https://github.com/RaidcoreGG/imgui): every window and overlay here is drawn with it.
+- **[Mumble Link API](https://github.com/RaidcoreGG/RCGG-lib-mumble-api)** (MIT), for the map and character
+  state the recorder writes.
+- Profession and elite specialization icons come from the official Guild Wars 2 API
+  ([render.guildwars2.com](https://render.guildwars2.com)). Guild Wars 2 and its assets are the property of
+  ArenaNet / NCSOFT and are used here under their
+  [third party program policy](https://help.guildwars2.com/hc/en-us/articles/360013625034-Policy-Third-Party-Programs).
+  They are not covered by this project's licence.
+
+Thank you to the players that helped me test it.
+
 ## Licence
 
-Not chosen yet.
+[MIT](LICENSE). Do what you like with it; keep the copyright notice. It comes with no warranty, and it is not
+affiliated with or endorsed by ArenaNet.

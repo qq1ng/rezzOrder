@@ -28,6 +28,9 @@ namespace Notify
 	// Forgets the current standing and any running flash (the render harness, between scenarios).
 	void Reset();
 
+	// Stops anything from reaching the sound card: for the test renderer and the unit tests, which drive the
+	// real notification code and would otherwise play every alert on the machine running them.
+	void SetSilent(bool aSilent);
 	// Plays one, at the volume in the settings. Used by the options page's preview buttons too.
 	void Play(Sound aSound);
 

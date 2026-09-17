@@ -479,7 +479,9 @@ namespace
 		BuffEvent(s, 10000, ArcDps::CBTS_BUFFAPPLY, 1, 1, 100, 10, 15000);
 		BuffEvent(s, 10000, ArcDps::CBTS_BUFFAPPLY, 1, 1, 200, 20, 15000);
 		Rezz::SessionView view = s.GetView(20000);
-		CHECK(view.SelfCanRevive);
+		// The effect being ours is a cast of ours, so our own revive is spent. We still get the countdown,
+		// because we are the one watching the player we revived.
+		CHECK(!view.SelfCanRevive);
 		CHECK(view.Illusions.size() == 2 && view.Illusions[0].EndsInMs == 5000 && view.Illusions[1].EndsInMs == 5000);
 		CHECK(view.Illusions[0].OurCast && view.Illusions[1].OurCast); // we cast it
 
@@ -740,6 +742,111 @@ namespace
 		w.OnRole(D1, Rezz::SquadRole::Member, 0, 300000);
 		w.OnRole(D1, Rezz::SquadRole::Member, 1, 301000);
 		CHECK(w.Order() == std::vector<std::string>({ X, D1, D2, ME }));
+	}
+
+	// Field log 2026-09-17: arcdps reported an Illusion of Life as cancelled after 37 ms, and its revive landed
+	// a second later. The caster kept their turn while the skill was recharging.
+	void TestEffectCountsAsUsedAfterACancel()
+	{
+		Rezz::Session s;
+		const std::string ALLY = ":ally.9";
+		s.OnAgentUpdate(Agent(ME, 1, 1, MESMER, true, true), 0);
+		s.OnAgentUpdate(Agent(D1, 20, 20, RANGER, true), 0);
+		s.OnAgentUpdate(Agent(ALLY, 90, 90, ENGINEER, true), 0);
+		s.SetOrder({ ME, D1 });
+		CHECK(s.GetView(1000).Turn.UpIndex == 0);
+
+		Event(s, 100000, ArcDps::CBTS_ANIMATIONSTART, 1, 1, IOL);
+		Event(s, 100037, ArcDps::CBTS_ANIMATIONSTOP, 1, 1, IOL, CMD, 59); // arcdps: cancelled after 37 ms
+		CHECK(s.GetView(100100).Turn.Rows[0].Status == Rezz::Eligibility::Ready);
+		BuffEvent(s, 100963, ArcDps::CBTS_BUFFAPPLY, 1, 1, 90, 90, 15000); // ... but the effect lands on the ally
+		Rezz::SessionView view = s.GetView(101000);
+		CHECK(view.Turn.Rows[0].Status == Rezz::Eligibility::Cooldown);
+		CHECK(view.Turn.UpIndex == 1); // the turn moved on
+		const Rezz::PlayerStatus* me = s.GetTracker().FindPlayer(ME);
+		CHECK(me && me->Skills.size() == 1 && me->Skills[0].Uses == 1);
+
+		// The usual case, where the cast was counted already, must not count twice.
+		Rezz::Session t;
+		t.OnAgentUpdate(Agent(ME, 1, 1, MESMER, true, true), 0);
+		t.OnAgentUpdate(Agent(ALLY, 90, 90, ENGINEER, true), 0);
+		t.SetOrder({ ME });
+		Event(t, 100000, ArcDps::CBTS_ANIMATIONSTART, 1, 1, IOL);
+		Event(t, 101300, ArcDps::CBTS_ANIMATIONSTOP, 1, 1, IOL, FULL, 1300);
+		BuffEvent(t, 101400, ArcDps::CBTS_BUFFAPPLY, 1, 1, 90, 90, 15000);
+		const Rezz::PlayerStatus* once = t.GetTracker().FindPlayer(ME);
+		CHECK(once && once->Skills[0].Uses == 1);
+	}
+
+	// Field log 2026-09-17: the squad rotates three at once, so the substitute lands in another subgroup than
+	// the one the benched player left.
+	void TestChainSwapOffTheBench()
+	{
+		Rezz::Session s = BenchSquad();
+		const std::string SUB = ":sub.9";
+		s.OnAgentUpdate(Spec(SUB, 90, RANGER, DRUID_SPEC), 0);
+		s.OnRole(SUB, Rezz::SquadRole::Member, 5, 0);
+		s.Tick(250000);
+		s.TakeNotices();
+
+		// Off the bench into subgroup 1, subgroup 1 into 2, subgroup 2 to the bench.
+		s.OnRole(SUB, Rezz::SquadRole::Member, 1, 300000);
+		s.OnRole(D1, Rezz::SquadRole::Member, 2, 301000);   // stays in the order: a reshuffle
+		s.OnRole(D2, Rezz::SquadRole::Member, 5, 302000);   // benched
+		CHECK(s.Order() == std::vector<std::string>({ X, D1, SUB, ME }));
+		CHECK(CountNotices(s.TakeNotices(), Rezz::NoticeKind::Substituted) == 2);
+
+		// A troubadour and a druid off the bench for a druid's place: the druid takes it.
+		Rezz::Session u = BenchSquad();
+		const std::string SUB2 = ":sub2.8";
+		u.OnAgentUpdate(Spec(SUB, 90, RANGER, DRUID_SPEC), 0);
+		u.OnAgentUpdate(Spec(SUB2, 91, MESMER, TROUBADOUR_SPEC), 0);
+		u.OnRole(SUB, Rezz::SquadRole::Member, 5, 0);
+		u.OnRole(SUB2, Rezz::SquadRole::Member, 5, 0);
+		u.Tick(250000);
+		u.TakeNotices();
+		u.OnRole(SUB, Rezz::SquadRole::Member, 1, 300000);
+		u.OnRole(SUB2, Rezz::SquadRole::Member, 3, 300500);
+		u.OnRole(D2, Rezz::SquadRole::Member, 5, 301000);
+		CHECK(u.Order() == std::vector<std::string>({ X, D1, SUB, ME }));
+
+		// Two druids off the bench for one druid's place can't be told apart.
+		Rezz::Session t = BenchSquad();
+		t.OnAgentUpdate(Spec(SUB, 90, RANGER, DRUID_SPEC), 0);
+		t.OnAgentUpdate(Spec(SUB2, 91, RANGER, DRUID_SPEC), 0);
+		t.OnRole(SUB, Rezz::SquadRole::Member, 5, 0);
+		t.OnRole(SUB2, Rezz::SquadRole::Member, 5, 0);
+		t.Tick(250000);
+		t.TakeNotices();
+		t.OnRole(SUB, Rezz::SquadRole::Member, 1, 300000);
+		t.OnRole(SUB2, Rezz::SquadRole::Member, 3, 300500);
+		t.OnRole(D2, Rezz::SquadRole::Member, 5, 301000);
+		CHECK(t.Order() == std::vector<std::string>({ X, D1, ME }));
+		size_t cantTell = 0;
+		for (const Rezz::Notice& notice : t.TakeNotices()) { if (notice.Text.find("Can't tell") != std::string::npos) { cantTell++; } }
+		CHECK(cantTell == 1);
+	}
+
+	// Pasting an order yourself is how a lieutenant sets one they typed by hand (field test 2026-09-17).
+	void TestOwnPasteAppliesToUs()
+	{
+		Rezz::Session s;
+		s.OnAgentUpdate(Agent(A, 100, 7, 2, true, true), 0); // us
+		s.OnAgentUpdate(Agent(B, 200, 8, 4, true), 0);
+		s.OnRole(A, Rezz::SquadRole::Lieutenant, 1, 0);
+		s.OnRole(B, Rezz::SquadRole::Member, 1, 0);
+		s.TakeNotices();
+		s.OnChatMessage(A, "!rezzorder b > a > bench:last", 1000);
+		CHECK(s.Order() == std::vector<std::string>({ B, A }));
+		Rezz::SessionView view = s.GetView(1500);
+		CHECK(view.Bench == Rezz::Share::kBenchLast);
+		CHECK(!view.HasShare); // ours, so no window asking whether to take it
+		CHECK(s.OrderIsOurs());
+		CHECK(CountNotices(s.TakeNotices(), Rezz::NoticeKind::ShareApplied) == 1);
+
+		// Pasting the same line again says nothing.
+		s.OnChatMessage(A, "!rezzorder b > a > bench:last", 2000);
+		CHECK(s.TakeNotices().empty());
 	}
 
 	void TestBenchIsTheLastSubgroup()
@@ -1570,9 +1677,12 @@ namespace
 		s.OnAgentUpdate(Agent(B, 200, 8, 4, true), 0);
 		s.SetOrder({ A, B });
 
-		// Our own message is the one we just pasted: it must not come back at us.
+		// Our own paste sets our own order: typed by hand, or pasted from somewhere else.
 		s.OnChatMessage(A, "!rezzorder b > a", 1000);
-		CHECK(s.Order() == std::vector<std::string>({ A, B }));
+		CHECK(s.Order() == std::vector<std::string>({ B, A }));
+		CHECK(CountNotices(s.TakeNotices(), Rezz::NoticeKind::ShareApplied) == 1);
+		// The same order again is not news.
+		s.OnChatMessage(A, "!rezzorder b > a", 1100);
 		CHECK(s.TakeNotices().empty());
 
 		s.OnChatMessage(B, "?rezzorder", 2000);
@@ -1639,6 +1749,9 @@ int main()
 		{ "character swaps around a swap", TestCharacterSwapsAroundASwap },
 		{ "share carries the bench", TestShareCarriesTheBench },
 		{ "bench is the last subgroup", TestBenchIsTheLastSubgroup },
+		{ "effect counts as used after a cancel", TestEffectCountsAsUsedAfterACancel },
+		{ "chain swap off the bench", TestChainSwapOffTheBench },
+		{ "own paste applies to us", TestOwnPasteAppliesToUs },
 		{ "share carries precast", TestShareCarriesPrecast },
 		{ "share ignores abusive lines", TestShareIgnoresAbusiveLines },
 		{ "shared precast reaches the session", TestSharedPrecastReachesTheSession },
