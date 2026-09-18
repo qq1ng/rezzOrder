@@ -572,7 +572,7 @@ namespace
 
 		// A short lull: combat starts again before the reset is due, and nothing changes.
 		Event(s, 210000, ArcDps::CBTS_SQCOMBATEND, 100, 7, 0);
-		s.Tick(212650 + 10000);
+		s.Tick(212650 + Rezz::Session::kRotationResetMs - 2000);
 		Event(s, 225000, ArcDps::CBTS_SQCOMBATSTART, 100, 7, 0);
 		s.Tick(227650 + Rezz::Session::kRotationResetMs);
 		CHECK(s.GetView(250000).Turn.UpIndex == 1);

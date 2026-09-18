@@ -47,7 +47,7 @@ instant revive are listed unless you tick *all professions*.
 
 - `UP` is whose turn it is. `BK` is the backup, meaning the next person ready after them.
 - During a fight the turn works down the list: someone whose rez comes back waits until the list gets back
-  to them. Once the squad has been out of combat for 20 seconds, the resets.
+  to them. Once the squad has been out of combat for 10 seconds, the turn resets to the top.
 - Bright green means **you**. A quieter green means somebody else is up.
 - A recharging player shows their CD timer in red, with a bar filling up.
 - A downed or dead player fades to grey, they are skipped.
@@ -78,7 +78,7 @@ Right-click the window and pick **style**:
 
 ![The layouts](docs/images/layouts.png)
 
-### Try it without a squad
+### Try without a squad
 
 Nexus options, **Demo squad**. A made-up squad fights on a loop so you can place the window, pick a
 layout and tune the sound and flash.
@@ -103,12 +103,12 @@ Nexus options, under *Illusion of Life*.
 
 ### After a fight: stats
 
-Once the squad has been out of combat for 20 seconds, the fight is counted and a line appears beside the turn
-window: `Fight 3: 5 revived - 7 possible - 9 downs, 2 rallied, 2 died`. Click it for the whole picture, or open
+Once the squad has been out of combat for 10 seconds, the fight is counted and a line appears beside the turn
+window: `Fight 3: 5 revived - 7 possible - 9 downs, 2 rallied, 2 died`. Click it for details, or open
 it from the turn window's right-click menu, the Nexus menu, or the options page.
 
 - **revived / possible / downs:** how many downs a revive skill picked up, how many happened while somebody's
-  revive was ready (counting how many allies those skills could take), and how many there were in total. *Possible*
+  revive was ready (counting how many allies those skills could revive), and how many there were in total. *Possible*
   cannot know who was in range, so read it as the best case.
 - **Per player:** allies saved, skills used (and how many were fired out of turn), turns missed while somebody lay
   there, casts that picked nobody up, casts cancelled (by hand, interrupted, moving, or going down mid-cast), and

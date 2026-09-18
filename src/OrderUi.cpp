@@ -2143,7 +2143,7 @@ namespace OrderUi
 				if (fights.empty())
 				{
 					ImGui::TextColored(kGrey, "No fights yet this session.");
-					ImGui::TextColored(kGrey, "A fight is counted once the squad has been out of combat for 20 seconds.");
+					ImGui::TextColored(kGrey, "A fight is counted once the squad has been out of combat for 10 seconds.");
 				}
 				else
 				{

@@ -130,11 +130,12 @@ namespace Rezz
 		static constexpr size_t kMaxRequests = 6;
 		// How soon the same person asking again is announced again, rather than only refreshing the window.
 		static constexpr uint64_t kAskAgainMs = 30 * 1000;
-		// How long the squad has to be out of combat before the turn goes back to the top of the order. ArcDPS
-		// ends a squad fight at every lull: in the field logs of 2026-09-15 a quarter of the breaks between its
-		// fights were under five seconds and there was no natural gap to go by. Twenty seconds merged its 114
-		// fights into 49 engagements of about a minute each, which is what a squad would call a fight.
-		static constexpr uint64_t kRotationResetMs = 20 * 1000;
+		// How long the squad has to be out of combat before the turn goes back to the top of the order, and with
+		// it the point where one fight's stats are closed. ArcDPS ends a squad fight at every lull: in the field
+		// logs of 2026-09-15 a quarter of the breaks between its fights were under five seconds, so a few seconds
+		// of quiet is the same fight carrying on. Ten seconds keeps those together while putting the turn back at
+		// the top soon enough to be trusted between pushes (decided with the squad, 2026-09-18).
+		static constexpr uint64_t kRotationResetMs = 10 * 1000;
 		// How long a place stays open for a substitute, or for its player to come back. A bench swap is two
 		// moves in the squad window in either order, but the one coming in may still have to swap character
 		// (a loading screen) before they count.
