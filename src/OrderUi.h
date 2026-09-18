@@ -12,6 +12,8 @@ namespace OrderUi
 	inline constexpr const char* kOverlayName = "Rezz Order Overlay";
 
 	extern bool              ShowEditor;
+	// The fight stats window. Set from the turn window's menu, the Nexus menu, or the summary line.
+	extern bool              ShowStats;
 	extern std::atomic<bool> TextInputActive; // a text field of ours has keyboard focus
 	extern std::atomic<bool> EditorToggleRequested;
 	extern std::atomic<bool> LockToggleRequested;
@@ -36,6 +38,7 @@ namespace OrderUi
 	extern FrameInfo LastEditorFrame; // the same for the order editor window
 	extern FrameInfo LastShareFrame;  // ... and for the "somebody shared an order" prompt
 	extern FrameInfo LastRequestFrame; // ... and for the "somebody asked for the order" prompt
+	extern FrameInfo LastStatsFrame;   // ... and for the fight stats window
 
 	// Opens a menu by itself so the render harness can photograph it: -1 nothing, -2 the window menu,
 	// 0 and up the row menu of that row. Render thread only, and never set while the game is running.
@@ -54,7 +57,10 @@ namespace OrderUi
 	void Render(const Context& aContext);
 	void Options();
 	// A roster notice to show in the overlay for a while.
-	void AddNotice(const std::string& aText, unsigned aNowMs);
+	// aHighlight is a piece of the text, normally a player's name, drawn dimmer than the rest.
+	// aHighlight is a piece of the text, normally a player's name, drawn dimmer than the rest. aOpensStats
+	// makes the line clickable, opening the fight stats.
+	void AddNotice(const std::string& aText, unsigned aNowMs, const std::string& aHighlight = {}, bool aOpensStats = false);
 	// Drops every message at once (the render harness, between scenarios).
 	void ClearNotices();
 	// We left the squad: forget the saved order too.

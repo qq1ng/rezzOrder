@@ -230,11 +230,34 @@ namespace Rezz
 					// The spirit's slam: owner by master instance id.
 					std::string owner = AccountByInstance(ev.SrcMasterInstId);
 					if (!owner.empty()) { m_Tracker.OnOwnedEffect(ev.Time, owner, ev.SkillId); }
+					TakeAttributions();
 					return;
 				}
 				std::string account = ResolveAccount(srcId, ev.SrcInstId);
 				if (account.empty()) { return; }
+
+				// Worked out before the tracker marks the skill spent, which would take them out of the running.
+				bool used = CountsAsUsed(*skill, ev.Result, ev.BuffDmg);
+				TurnView turn = m_Tracker.GetTurn(ev.Time);
+				bool inTurn = turn.UpIndex >= 0 && turn.Rows[turn.UpIndex].Account == account;
+				const PlayerStatus* caster = m_Tracker.FindPlayer(account);
+				CastEnd ending = CastEnd::Full;
+				if (!used)
+				{
+					switch (ev.Result)
+					{
+						case ArcDps::ANIMSTOP_COMMAND:   ending = CastEnd::ByHand; break;
+						case ArcDps::ANIMSTOP_INTERRUPT: ending = CastEnd::Interrupted; break;
+						case ArcDps::ANIMSTOP_MOVEDODGE: ending = CastEnd::Movement; break;
+						default: ending = CastEnd::ByHand; break;
+					}
+					// Going down mid-cast reads as a cancel too, and is worth telling apart.
+					if (caster && caster->Life != LifeState::Alive) { ending = CastEnd::WentDown; }
+				}
+				m_Stats.OnCast(ev.Time, account, used, ending, inTurn);
+
 				m_Tracker.OnCastStop(ev.Time, account, ev.SkillId, ev.Result, ev.BuffDmg);
+				TakeAttributions();
 				if (!m_IllusionApplySeen && skill->Group == ReviveGroup::IllusionOfLife && CountsAsUsed(*skill, ev.Result, ev.BuffDmg))
 				{
 					MatchIllusion(ev.Time, account, true);
@@ -251,6 +274,10 @@ namespace Rezz
 				LifeState state = sc == ArcDps::CBTS_CHANGEDOWN ? LifeState::Downed
 					: sc == ArcDps::CBTS_CHANGEDEAD ? LifeState::Dead : LifeState::Alive;
 				m_Tracker.OnLifeState(ev.Time, account, state);
+				TakeAttributions();
+				if (state == LifeState::Downed) { m_Stats.OnDown(ev.Time, account, ChanceNow(ev.Time)); }
+				else if (state == LifeState::Dead) { m_Stats.OnDead(ev.Time, account); }
+				else { m_PendingUps.push_back(PendingUp{ account, ev.Time, aNowMs }); }
 				// Down or dead under Illusion of Life: either it ran out, or they went down before it did. Both
 				// leave nothing to warn about.
 				if (state != LifeState::Alive) { m_Illusions.erase(account); }
@@ -696,6 +723,55 @@ namespace Rezz
 		}
 	}
 
+	FightStats::Chance Session::ChanceNow(uint64_t aTimeMs) const
+	{
+		FightStats::Chance chance;
+		TurnView turn = m_Tracker.GetTurn(aTimeMs);
+		if (turn.UpIndex >= 0) { chance.UpAccount = turn.Rows[turn.UpIndex].Account; }
+		for (const OrderRow& row : turn.Rows)
+		{
+			if (row.Status != Eligibility::Ready) { continue; }
+			// How many allies that player could pick up with what they have: the skill they have been seen
+			// using, or the one their profession carries.
+			ReviveGroup group = ReviveGroup::Count;
+			if (row.Player != nullptr && !row.Player->Skills.empty()) { group = row.Player->Skills.front().Group; }
+			uint8_t targets = group == ReviveGroup::Count ? 0 : GroupTargets(group);
+			chance.Capacity += targets > 0 ? targets : 1; // not seen casting yet: assume they can pick up one
+		}
+		return chance;
+	}
+
+	void Session::TakeAttributions()
+	{
+		for (Attribution& attribution : m_Tracker.TakeAttributions())
+		{
+			m_Stats.OnRevived(attribution.TimeMs, attribution.Reviver);
+			m_Attributions.push_back(std::move(attribution));
+		}
+		constexpr size_t kKeep = 32;
+		if (m_Attributions.size() > kKeep) { m_Attributions.erase(m_Attributions.begin(), m_Attributions.end() - kKeep); }
+	}
+
+	void Session::SettleUps(uint64_t aNowMs)
+	{
+		// An ally getting up is matched with the cast that did it a moment later, so each up waits before it is
+		// counted as revived or as a rally.
+		constexpr uint64_t kSameUpMs = 1500;
+		for (size_t i = 0; i < m_PendingUps.size(); )
+		{
+			const PendingUp& up = m_PendingUps[i];
+			if (aNowMs < up.ArrivedMs + kUpSettleMs) { i++; continue; }
+			std::string reviver;
+			for (const Attribution& attribution : m_Attributions)
+			{
+				uint64_t apart = attribution.TimeMs > up.TimeMs ? attribution.TimeMs - up.TimeMs : up.TimeMs - attribution.TimeMs;
+				if (attribution.Revived == up.Account && apart <= kSameUpMs) { reviver = attribution.Reviver; break; }
+			}
+			m_Stats.OnUp(up.TimeMs, up.Account, reviver);
+			m_PendingUps.erase(m_PendingUps.begin() + static_cast<std::ptrdiff_t>(i));
+		}
+	}
+
 	void Session::MatchIllusion(uint64_t aTimeMs, const std::string& aAccount, bool aIsCast)
 	{
 		// In the field logs the ally gets up at exactly the millisecond the cast completes, and the two events
@@ -779,10 +855,27 @@ namespace Rezz
 		// shorter than kRotationResetMs is the same fight carrying on, and the rotation carries on with it.
 		// It holds for as long as the squad stays out of combat, so a revive used between fights (or before the
 		// first one) doesn't carry into the next fight either.
+		SettleUps(aNowMs);
 		if (m_CombatSinceMs == 0)
 		{
 			if (m_OutOfCombatSinceMs == 0) { m_OutOfCombatSinceMs = aNowMs; }
-			if (aNowMs >= m_OutOfCombatSinceMs + kRotationResetMs) { m_Tracker.ResetRotation(); }
+			if (aNowMs >= m_OutOfCombatSinceMs + kRotationResetMs)
+			{
+				m_Tracker.ResetRotation();
+				// The engagement is over, so its stats are final. Same break as the rotation reset: arcdps ends a
+				// fight at every lull, and a squad would call that one fight.
+				if (m_Stats.Active())
+				{
+					FightStat fight;
+					if (m_Stats.Close(aNowMs, m_FightNumber + 1, fight) && fight.Downs > 0)
+					{
+						m_FightNumber++;
+						m_Fights.push_back(fight);
+						if (m_Fights.size() > kKeepFights) { m_Fights.erase(m_Fights.begin()); }
+						Notify(NoticeKind::FightSummary, {}, "Fight " + std::to_string(fight.Number) + ": " + fight.Summary());
+					}
+				}
+			}
 		}
 
 		// Anyone in the order who didn't come back after our own map change left while we were loading.
@@ -846,22 +939,47 @@ namespace Rezz
 		// Our own paste: normally the order it names is already ours, but it may have been typed by hand or
 		// pasted from somewhere else, and then this is how we get it (field test 2026-09-17).
 		bool ours = !aAccount.empty() && aAccount == m_SelfAccount;
-		if (ours && message.What == Share::Kind::Request) { return; }
 
 		std::string name = DisplayAccount(aAccount);
-		if (message.What == Share::Kind::Request)
+		if (message.What == Share::Kind::Remove)
 		{
-			// Someone joined late and asked. Only a client that has an order can answer.
-			// Only a client that has an order can answer one.
-			if (m_Tracker.Order().empty()) { return; }
-			bool repeat = aAccount == m_AskedNoticeFrom && aNowMs < m_AskedNoticeMs + kAskAgainMs;
-			m_RequestFrom = aAccount;
-			m_RequestAtMs = aNowMs;
-			if (!repeat)
+			// Taking yourself out needs nobody's approval, so every client does it and the order stays the same
+			// everywhere. Somebody who swapped off a revive build is the usual reason.
+			std::erase_if(m_Requests, [&](const JoinRequest& aRequest) { return aRequest.Account == aAccount; });
+			if (!InOrder(aAccount)) { return; }
+			int standing = SelfStanding(aNowMs);
+			std::string named = Named(aAccount);
+			DropFromOrder(aAccount);
+			Notify(NoticeKind::LeftSquad, aAccount, named + " asked to be taken out of the order" +
+				StandingChange(standing, SelfStanding(aNowMs)));
+			return;
+		}
+		if (message.What == Share::Kind::Add)
+		{
+			if (ours || !AnswersRequests()) { return; }
+			auto member = m_Roster.find(aAccount);
+			if (member == m_Roster.end() || !member->second.InSquad) { return; }
+			if (InOrder(aAccount)) { return; } // already in it: nothing to decide
+
+			auto waiting = std::find_if(m_Requests.begin(), m_Requests.end(),
+				[&](const JoinRequest& aRequest) { return aRequest.Account == aAccount; });
+			if (waiting != m_Requests.end())
 			{
-				m_AskedNoticeFrom = aAccount;
-				m_AskedNoticeMs = aNowMs;
-				Notify(NoticeKind::ShareRequested, aAccount, name + " asked for the revive order");
+				waiting->Place = message.Place;
+				waiting->TimeMs = aNowMs;
+			}
+			else
+			{
+				if (m_Requests.size() >= kMaxRequests) { m_Requests.pop_front(); }
+				m_Requests.push_back(JoinRequest{ aAccount, message.Place, aNowMs });
+			}
+
+			uint64_t& announced = m_AskedNoticeMs[aAccount];
+			if (aNowMs >= announced + kAskAgainMs || announced == 0)
+			{
+				announced = aNowMs;
+				std::string where = message.Place > 0 ? " at " + std::to_string(message.Place) + "." : "";
+				Notify(NoticeKind::ShareRequested, aAccount, name + " asked to be in the revive order" + where);
 			}
 			return;
 		}
@@ -936,10 +1054,28 @@ namespace Rezz
 		m_Share = SharedOrder{};
 	}
 
-	void Session::ClearRequest()
+	void Session::ClearRequest(const std::string& aAccount)
 	{
-		m_RequestFrom.clear();
-		m_RequestAtMs = 0;
+		if (aAccount.empty()) { m_Requests.clear(); return; }
+		std::erase_if(m_Requests, [&](const JoinRequest& aRequest) { return aRequest.Account == aAccount; });
+	}
+
+	bool Session::AnswersRequests() const
+	{
+		if (m_AnswerRule == AnswerRule::Never) { return false; }
+		if (m_AnswerRule == AnswerRule::Always) { return true; }
+		if (!m_Tracker.Order().empty()) { return OrderIsOurs(); }
+
+		// No order yet, so nobody owns one: the commander is asked to start it. If no commander is running the
+		// addon, their lieutenants are, which is as close to one client as the roster can tell us.
+		auto self = m_Roster.find(m_SelfAccount);
+		if (self == m_Roster.end()) { return false; }
+		if (self->second.Role == SquadRole::Leader) { return true; }
+		if (self->second.Role != SquadRole::Lieutenant) { return false; }
+		return std::none_of(m_Roster.begin(), m_Roster.end(), [](const auto& aEntry)
+		{
+			return aEntry.second.Role == SquadRole::Leader && aEntry.second.InSquad;
+		});
 	}
 
 	SessionView Session::GetView(uint64_t aNowMs) const
@@ -947,14 +1083,15 @@ namespace Rezz
 		SessionView view;
 		view.HasShare = m_HasShare;
 		view.Share = m_Share;
-		// An unanswered request stops asking after a while: by then the squad has moved on.
-		// Only the client the order belongs to is asked to answer, so one question doesn't open a window on
-		// every screen in the squad.
-		bool answers = m_AnswerRule == AnswerRule::Always ||
-			(m_AnswerRule == AnswerRule::WhenOrderIsOurs && OrderIsOurs());
-		view.HasRequest = answers && !m_RequestFrom.empty() && aNowMs < m_RequestAtMs + kRequestShowMs &&
-			!m_Tracker.Order().empty();
-		if (view.HasRequest) { view.RequestFrom = m_RequestFrom; }
+		// Unanswered requests stop asking after a while: by then the squad has moved on. Only one client is
+		// asked to answer, so one player asking doesn't open a window on every screen in the squad.
+		if (AnswersRequests())
+		{
+			for (const JoinRequest& request : m_Requests)
+			{
+				if (aNowMs < request.TimeMs + kRequestShowMs && !InOrder(request.Account)) { view.Requests.push_back(request); }
+			}
+		}
 		view.Turn = m_Tracker.GetTurn(aNowMs);
 		view.BackupIndex = view.Turn.BackupIndex;
 		view.Order = m_Tracker.Order();

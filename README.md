@@ -101,6 +101,25 @@ cast it, and everyone whose own revive skill is ready, gets a countdown of their
 their names, with a sound and a pink flash along the screen edges when it starts. It stops the moment they rally.
 Nexus options, under *Illusion of Life*.
 
+### After a fight: stats
+
+Once the squad has been out of combat for 20 seconds, the fight is counted and a line appears beside the turn
+window: `Fight 3: 5 revived - 7 possible - 9 downs, 2 rallied, 2 died`. Click it for the whole picture, or open
+it from the turn window's right-click menu, the Nexus menu, or the options page.
+
+- **revived / possible / downs:** how many downs a revive skill picked up, how many happened while somebody's
+  revive was ready (counting how many allies those skills could take), and how many there were in total. *Possible*
+  cannot know who was in range, so read it as the best case.
+- **Per player:** allies saved, skills used (and how many were fired out of turn), turns missed while somebody lay
+  there, casts that picked nobody up, casts cancelled (by hand, interrupted, moving, or going down mid-cast), and
+  how long on average they took from an ally going down to their cast.
+- **Copy** puts the table on the clipboard for Discord.
+- Stats live in memory for the session only, and nothing is written to disk. They cover what your own client saw:
+  players out of ArcDPS range are missing.
+
+The summary line can be set to appear after every fight, only while Ctrl+Shift is held, or never, in the options
+page under *Fight stats*.
+
 ### Share the order with the squad
 
 Addons are not allowed to write in chat, so sharing is done via copy paste:
@@ -113,14 +132,21 @@ Everyone else running the addon automatically reads it from chat. An order from 
 instantly. An order from anybody else opens a window showing the order and where it would put you, with *Use this
 order* and *Ignore*.
 
-### Ask for the order
+### Ask to be put in the order
 
-Type **`?rezzorder`** in squad chat. This is for joining a squad that already agreed on an order. The question goes to every client running the addon.
+Type **`!rezzorder add`** in squad chat, or **`!rezzorder add 3`** / **`add first`** if you want a particular place.
+This is how you get into a squad's order without the commander having to search people manually.
 
-Only one person gets a popup, the one whose order it is, so a squad of ten does not get ten popups.
-Their popup names the asking person and offers *Copy it for squad chat*. If you are not in the order yet, which is the
-usual reason for asking, the first button instead reads *Add playerXYZ and copy*, which puts you at the end and
-copies the line in one click.
+Only one person gets a popup: the one whose order it is, so a squad of ten does not get ten popups. Before anybody
+has an order there is no owner, so the commander is asked instead, or the lieutenants when no commander is running
+the addon.
+
+Their popup lists everyone waiting, each with the place they asked for already filled in, and a box to put them
+somewhere else. *Add and copy* puts them in and copies the new order; it still has to be pasted in squad chat for
+the rest of the squad to get it. Where somebody ends up is the owner's decision, not the asker's.
+
+**`!rezzorder remove`** takes you out again, on everybody's screen at once and without asking anyone. Use it when
+you swap to a build without a revive skill.
 
 ### Bench swaps
 

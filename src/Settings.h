@@ -25,6 +25,8 @@ namespace Settings
 		// Players who may spend their revive before their turn, when they see a fight going badly. They are
 		// in the order like anyone else; the window and the shared line just say so.
 		std::vector<std::string> Precast;
+		// The line in the messages strip after a fight: 0 off, 1 always, 2 only while Ctrl+Shift is held.
+		int   StatsSummary = 1;
 		int Bench = 0;                          // bench subgroup for bench swaps, 255 the last, 0 none (shared with the order)
 		std::map<std::string, std::string> Nicknames; // account name -> name to show instead
 		// Named orders, for squads that run together often. Saved as preset=<name>=<account>><account>...

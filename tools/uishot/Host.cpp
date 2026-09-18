@@ -247,6 +247,7 @@ namespace ArcStyle
 
 namespace Live
 {
+	std::vector<Rezz::FightStat> s_Fights;
 	void OnCombatSquad(const ArcDps::EvCombatData*) {}
 	void OnAgentUpdate(const ArcDps::EvAgentUpdate*) {}
 	void OnSquadUpdate(const UserInfo*, uint64_t) {}
@@ -256,13 +257,23 @@ namespace Live
 	void SetOrder(const std::vector<std::string>& aAccounts) { s_View.Order = aAccounts; }
 	void SetPrecast(const std::vector<std::string>& aAccounts) { s_View.Precast = aAccounts; }
 	void SetBench(int aSubgroup) { s_View.Bench = static_cast<uint16_t>(aSubgroup); }
+	std::vector<Rezz::FightStat> GetFights() { return s_Fights; }
 	void SetShareRules(bool, bool) {}
 	void SetAnswerRule(int) {}
 	void SetSubstitutes(bool) {}
 	void AcceptShare() { s_View.HasShare = false; }
 	void DismissShare() { s_View.HasShare = false; }
-	void ClearRequest() { s_View.HasRequest = false; }
+	void ClearRequest(const std::string& aAccount)
+	{
+		if (aAccount.empty()) { s_View.Requests.clear(); return; }
+		std::erase_if(s_View.Requests, [&](const Rezz::JoinRequest& aRequest) { return aRequest.Account == aAccount; });
+	}
 
 	Rezz::SessionView GetView() { return s_View; }
 	std::vector<Rezz::Notice> TakeNotices() { return {}; }
+}
+
+namespace Host
+{
+	void SetFights(std::vector<Rezz::FightStat> aFights) { Live::s_Fights = std::move(aFights); }
 }

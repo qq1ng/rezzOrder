@@ -849,6 +849,120 @@ namespace
 		CHECK(s.TakeNotices().empty());
 	}
 
+	// One fight through the session, checked against what the window would show afterwards.
+	void TestFightStats()
+	{
+		Rezz::Session s;
+		const std::string ALLY = ":ally.9", ALLY2 = ":ally2.8";
+		s.OnAgentUpdate(Agent(ME, 1, 1, MESMER, true, true), 0);   // us: Illusion of Life
+		s.OnAgentUpdate(Agent(D1, 20, 20, RANGER, true), 0);       // a druid
+		s.OnAgentUpdate(Agent(ALLY, 90, 90, ENGINEER, true), 0);
+		s.OnAgentUpdate(Agent(ALLY2, 80, 80, ENGINEER, true), 0);
+		s.SetOrder({ ME, D1 });
+		s.Tick(1000);
+
+		// The fight starts, an ally goes down and we pick them up.
+		Event(s, 10000, ArcDps::CBTS_SQCOMBATSTART, 0, 0, 0);
+		s.Tick(10000);
+		Event(s, 11000, ArcDps::CBTS_CHANGEDOWN, 90, 90, 0);
+		Event(s, 12000, ArcDps::CBTS_ANIMATIONSTART, 1, 1, IOL);
+		Event(s, 13300, ArcDps::CBTS_ANIMATIONSTOP, 1, 1, IOL, FULL, 1300);
+		Event(s, 13300, ArcDps::CBTS_CHANGEUP, 90, 90, 0);
+
+		// A second ally goes down, the druid cancels by hand, and that one dies.
+		Event(s, 20000, ArcDps::CBTS_CHANGEDOWN, 80, 80, 0);
+		Event(s, 21000, ArcDps::CBTS_ANIMATIONSTART, 20, 20, SON);
+		Event(s, 21500, ArcDps::CBTS_ANIMATIONSTOP, 20, 20, SON, CMD, 500);
+		Event(s, 30000, ArcDps::CBTS_CHANGEDEAD, 80, 80, 0);
+
+		// Out of combat long enough and the fight is closed.
+		Event(s, 31000, ArcDps::CBTS_SQCOMBATEND, 0, 0, 0);
+		s.Tick(33700); // the combat end arrives ~2.6 s after the event
+		s.Tick(33700 + Rezz::Session::kRotationResetMs + 1000);
+
+		const std::vector<Rezz::FightStat>& fights = s.Fights();
+		CHECK(fights.size() == 1);
+		if (fights.empty()) { return; }
+		const Rezz::FightStat& fight = fights[0];
+		CHECK(fight.Number == 1);
+		CHECK(fight.Downs == 2);
+		CHECK(fight.Revived == 1);
+		CHECK(fight.Died == 1);
+		CHECK(fight.Rallied == 0);
+		CHECK(fight.Possible == 2); // both skills were ready when each of them went down
+
+		auto find = [&](const std::string& aAccount) -> const Rezz::PlayerStat*
+		{
+			for (const Rezz::PlayerStat& player : fight.Players) { if (player.Account == aAccount) { return &player; } }
+			return nullptr;
+		};
+		const Rezz::PlayerStat* me = find(ME);
+		CHECK(me && me->Revived == 1 && me->Used == 1 && me->Overlapped == 0 && me->OnNothing == 0);
+		CHECK(me && me->TooLate == 0 && me->MissedTurns == 0);
+		CHECK(me && me->OutOfTurn == 0);         // it was our turn
+		CHECK(me && me->LateCasts == 1 && me->AverageLateMs() == 2300); // the ally was down 2.3 s before the cast
+
+		const Rezz::PlayerStat* druid = find(D1);
+		CHECK(druid && druid->ByHand == 1 && druid->Used == 0 && druid->Revived == 0);
+		CHECK(druid && druid->MissedTurns == 1 && druid->LetDie == 1); // their turn, and that ally died
+
+		// The line the messages strip shows.
+		CHECK(fight.Summary().find("1 revived") != std::string::npos);
+		CHECK(fight.Summary().find("2 downs") != std::string::npos);
+		CHECK(fight.Summary().find("1 died") != std::string::npos);
+	}
+
+	// A revive spent on nobody, and one cast while it was somebody else's turn.
+	void TestFightStatsWasteAndOutOfTurn()
+	{
+		Rezz::Session s;
+		s.OnAgentUpdate(Agent(ME, 1, 1, MESMER, true, true), 0);
+		s.OnAgentUpdate(Agent(D1, 20, 20, RANGER, true), 0);
+		s.SetOrder({ ME, D1 });
+		s.Tick(1000);
+
+		Event(s, 10000, ArcDps::CBTS_SQCOMBATSTART, 0, 0, 0);
+		s.Tick(10000);
+		// The druid fires while it is our turn, and picks nobody up.
+		Event(s, 11000, ArcDps::CBTS_ANIMATIONSTART, 20, 20, SON);
+		Event(s, 12500, ArcDps::CBTS_ANIMATIONSTOP, 20, 20, SON, FULL, 1500);
+		Event(s, 20000, ArcDps::CBTS_SQCOMBATEND, 0, 0, 0);
+		s.Tick(22700);
+		s.Tick(22700 + Rezz::Session::kRotationResetMs + 1000);
+
+		CHECK(s.Fights().empty()); // no downs: nothing worth keeping
+
+		// With a down in it the same fight is kept.
+		Rezz::Session t;
+		const std::string ALLY = ":ally.9";
+		t.OnAgentUpdate(Agent(ME, 1, 1, MESMER, true, true), 0);
+		t.OnAgentUpdate(Agent(D1, 20, 20, RANGER, true), 0);
+		t.OnAgentUpdate(Agent(ALLY, 90, 90, ENGINEER, true), 0);
+		t.SetOrder({ ME, D1 });
+		t.Tick(1000);
+		Event(t, 10000, ArcDps::CBTS_SQCOMBATSTART, 0, 0, 0);
+		t.Tick(10000);
+		Event(t, 11000, ArcDps::CBTS_CHANGEDOWN, 90, 90, 0);
+		Event(t, 11200, ArcDps::CBTS_ANIMATIONSTART, 20, 20, SON);
+		Event(t, 12700, ArcDps::CBTS_ANIMATIONSTOP, 20, 20, SON, FULL, 1500); // out of turn, ours was ready
+		Event(t, 40000, ArcDps::CBTS_CHANGEUP, 90, 90, 0);                    // rallied much later, not from a skill
+		Event(t, 41000, ArcDps::CBTS_SQCOMBATEND, 0, 0, 0);
+		t.Tick(43700);
+		t.Tick(43700 + Rezz::Session::kRotationResetMs + 1000);
+
+		CHECK(t.Fights().size() == 1);
+		if (t.Fights().empty()) { return; }
+		const Rezz::FightStat& fight = t.Fights()[0];
+		CHECK(fight.Rallied == 1 && fight.Revived == 0 && fight.Downs == 1);
+		for (const Rezz::PlayerStat& player : fight.Players)
+		{
+			if (player.Account != D1) { continue; }
+			// They fired with an ally on the floor and picked nobody up, out of turn.
+			CHECK(player.Used == 1 && player.TooLate == 1 && player.OnNothing == 0 && player.Overlapped == 0);
+			CHECK(player.OutOfTurn == 1);
+		}
+	}
+
 	void TestBenchIsTheLastSubgroup()
 	{
 		// "last": the same swaps work while the bench is subgroup 5...
@@ -1403,7 +1517,7 @@ namespace
 		// Separators and stars on their own name nobody, so whatever they parse into matches no squad member.
 		Rezz::Share::Message punctuation = Rezz::Share::Parse("!rezzorder >>>,,,***");
 		CHECK(Rezz::Share::Resolve(punctuation.Entries, roster).Accounts.empty());
-		CHECK(Rezz::Share::Parse("!rezzorder    ").What == Rezz::Share::Kind::Request);
+		CHECK(Rezz::Share::Parse("!rezzorder    ").What == Rezz::Share::Kind::Add);
 
 		// Whatever the line says, an order can only ever name people who are really in the squad.
 		Rezz::Share::Message fake = Rezz::Share::Parse("!rezzorder Gorath > NotInSquad > Gorath > murako");
@@ -1435,8 +1549,18 @@ namespace
 	{
 		using Kind = Rezz::Share::Kind;
 		CHECK(Rezz::Share::Parse("hello everyone").What == Kind::None);
-		CHECK(Rezz::Share::Parse("?rezzorder").What == Kind::Request);
-		CHECK(Rezz::Share::Parse("  ?REZZORDER  ").What == Kind::Request);
+		// Asking to be put in the order, the places people name, and the old "?rezzorder" that meant the same.
+		CHECK(Rezz::Share::Parse("?rezzorder").What == Kind::Add);
+		CHECK(Rezz::Share::Parse("  ?REZZORDER  ").What == Kind::Add);
+		CHECK(Rezz::Share::Parse("!rezzorder add").What == Kind::Add);
+		CHECK(Rezz::Share::Parse("!rezzorder ADD 3").Place == 3);
+		CHECK(Rezz::Share::Parse("!rezzorder add first").Place == 1);
+		CHECK(Rezz::Share::Parse("!rezzorder add last").Place == 0);  // no preference: the end
+		CHECK(Rezz::Share::Parse("!rezzorder add 99").Place == 0);    // beyond the order: the end
+		CHECK(Rezz::Share::Parse("!rezzorder remove").What == Kind::Remove);
+		CHECK(Rezz::Share::Parse("!rezzorder out").What == Kind::Remove);
+		// A player really called "Addison" is still a name, not the add command.
+		CHECK(Rezz::Share::Parse("!rezzorder Addison > murako").What == Kind::Order);
 		Rezz::Share::Message message = Rezz::Share::Parse("!rezzorder Gorath, murako > Sairana ");
 		CHECK(message.What == Kind::Order);
 		CHECK(message.Entries.size() == 3);
@@ -1525,26 +1649,83 @@ namespace
 		Rezz::Session s;
 		s.OnAgentUpdate(Agent(A, 100, 7, 2, true, true), 0);
 		s.OnAgentUpdate(Agent(B, 200, 8, 4, true), 0);
+		s.OnAgentUpdate(Agent(C, 300, 9, 1, true), 0);
+		s.OnRole(B, Rezz::SquadRole::Member, 1, 0);
+		s.OnRole(C, Rezz::SquadRole::Member, 1, 0);
 		s.SetOrder({ A, B });
 
-		s.OnChatMessage(B, "?rezzorder", 1000);
-		CHECK(s.GetView(2000).HasRequest);
-		CHECK(s.GetView(2000).RequestFrom == B);
-		CHECK(!s.GetView(1000 + Rezz::Session::kRequestShowMs + 1).HasRequest);
+		s.OnChatMessage(C, "!rezzorder add", 1000);
+		CHECK(s.GetView(2000).Requests.size() == 1);
+		CHECK(s.GetView(2000).Requests[0].Account == C && s.GetView(2000).Requests[0].Place == 0);
+		CHECK(s.GetView(1000 + Rezz::Session::kRequestShowMs + 1).Requests.empty());
 
-		s.OnChatMessage(B, "?rezzorder", 100000);
-		CHECK(s.GetView(101000).HasRequest);
-		s.ClearRequest(); // answered, or waved away
-		CHECK(!s.GetView(101000).HasRequest);
+		// The place they ask for is carried through, and asking again only moves it.
+		s.OnChatMessage(C, "!rezzorder add 2", 100000);
+		CHECK(s.GetView(101000).Requests.size() == 1 && s.GetView(101000).Requests[0].Place == 2);
+		s.ClearRequest(C); // answered, or waved away
+		CHECK(s.GetView(101000).Requests.empty());
 
-		// Without an order of our own there is nothing to answer with.
-		s.SetOrder({});
-		s.OnChatMessage(B, "?rezzorder", 102000);
-		CHECK(!s.GetView(103000).HasRequest);
+		// Adding them settles it without anyone pressing anything.
+		s.OnChatMessage(C, "!rezzorder add", 102000);
+		CHECK(s.GetView(102500).Requests.size() == 1);
+		s.SetOrder({ A, B, C });
+		CHECK(s.GetView(103000).Requests.empty());
+
+		// Somebody already in the order has nothing to ask for.
+		s.OnChatMessage(C, "!rezzorder add", 104000);
+		CHECK(s.GetView(104500).Requests.empty());
 	}
 
-	// One "?rezzorder" must not open a window on every screen in the squad: only the client whose order it is
-	// gets asked, and even that closes as soon as somebody answers.
+	void TestJoinRequestPlacesAndRemoval()
+	{
+		Rezz::Session s;
+		s.OnAgentUpdate(Agent(A, 100, 7, 2, true, true), 0);
+		s.OnAgentUpdate(Agent(B, 200, 8, 4, true), 0);
+		s.OnAgentUpdate(Agent(C, 300, 9, 1, true), 0);
+		s.OnRole(B, Rezz::SquadRole::Member, 1, 0);
+		s.OnRole(C, Rezz::SquadRole::Member, 1, 0);
+		s.SetOrder({ A, B, C });
+		s.SetPrecast({ C });
+		s.TakeNotices();
+
+		// Taking yourself out needs no approval, so every client does it at once.
+		s.OnChatMessage(C, "!rezzorder remove", 1000);
+		CHECK(s.Order() == std::vector<std::string>({ A, B }));
+		CHECK(s.Precast().empty());
+		CHECK(s.TakeNotices().size() == 1);
+		s.OnChatMessage(C, "!rezzorder remove", 2000); // already out: nothing to say
+		CHECK(s.TakeNotices().empty());
+
+		// "first", a number and a plain add all come through as places to start the picker on.
+		s.OnChatMessage(C, "!rezzorder add first", 3000);
+		CHECK(s.GetView(3100).Requests.size() == 1 && s.GetView(3100).Requests[0].Place == 1);
+		s.ClearRequest();
+		CHECK(s.GetView(3200).Requests.empty());
+
+		// Asking over and over refreshes the one request and says so only once in a while.
+		s.OnChatMessage(C, "!rezzorder add 2", 4000);
+		s.OnChatMessage(C, "!rezzorder add 2", 4500);
+		s.OnChatMessage(C, "!rezzorder add 2", 5000);
+		CHECK(s.GetView(5100).Requests.size() == 1);
+		CHECK(CountNotices(s.TakeNotices(), Rezz::NoticeKind::ShareRequested) == 1);
+
+		// A crowd forming up: the window holds a few, and the oldest gives way.
+		Rezz::Session t;
+		t.OnAgentUpdate(Agent(A, 100, 7, 2, true, true), 0);
+		t.SetOrder({ A });
+		for (size_t i = 0; i < Rezz::Session::kMaxRequests + 2; i++)
+		{
+			std::string account = ":asker" + std::to_string(i) + ".1";
+			t.OnAgentUpdate(Agent(account, 500 + i, static_cast<uint16_t>(500 + i), 4, true), 0);
+			t.OnRole(account, Rezz::SquadRole::Member, 1, 0);
+			t.OnChatMessage(account, "!rezzorder add", 1000 + i * 10);
+		}
+		CHECK(t.GetView(2000).Requests.size() == Rezz::Session::kMaxRequests);
+		CHECK(t.GetView(2000).Requests.front().Account == ":asker2.1"); // the first two gave way
+	}
+
+	// One request must not open a window on every screen in the squad: only the client whose order it is gets
+	// asked, and before there is an order, the commander.
 	void TestOnlyTheOrdersOwnerIsAsked()
 	{
 		Rezz::Session s;
@@ -1552,35 +1733,55 @@ namespace
 		s.OnAgentUpdate(Agent(B, 200, 8, 4, true), 0);
 		s.OnAgentUpdate(Agent(C, 300, 9, 1, true), 0);
 		s.OnRole(B, Rezz::SquadRole::Leader, 1, 0);
+		s.OnRole(C, Rezz::SquadRole::Member, 1, 0);
 
 		// The commander's order arrives and we take it over: it is not ours to answer for.
-		s.OnChatMessage(B, "!rezzorder a > b > c", 1000);
+		s.OnChatMessage(B, "!rezzorder a > b", 1000);
 		CHECK(!s.OrderIsOurs());
-		s.OnChatMessage(C, "?rezzorder", 2000);
-		CHECK(!s.GetView(2500).HasRequest);
-		CHECK(s.TakeNotices().size() == 2); // the share and the request are still worth saying
+		s.OnChatMessage(C, "!rezzorder add", 2000);
+		CHECK(s.GetView(2500).Requests.empty());
 
 		// Building the order here makes it ours again.
 		s.SetOrder({ A, B });
 		CHECK(s.OrderIsOurs());
-		s.OnChatMessage(C, "?rezzorder", 3000);
-		CHECK(s.GetView(3500).HasRequest);
+		s.OnChatMessage(C, "!rezzorder add", 3000);
+		CHECK(s.GetView(3500).Requests.size() == 1);
 
-		// Somebody else answered in chat: the question is settled for everyone.
+		// Somebody else's order taking over means it is theirs to answer again.
 		s.OnChatMessage(B, "!rezzorder b > a", 4000);
-		CHECK(!s.GetView(4500).HasRequest);
+		CHECK(s.GetView(4500).Requests.empty());
 
 		// "always" is for the player who wants to answer whatever happens.
 		s.SetAnswerRule(Rezz::Session::AnswerRule::Always);
-		s.OnChatMessage(C, "?rezzorder", 5000);
-		CHECK(s.GetView(5500).HasRequest);
+		s.OnChatMessage(C, "!rezzorder add", 5000);
+		CHECK(s.GetView(5500).Requests.size() == 1);
 		s.SetAnswerRule(Rezz::Session::AnswerRule::Never);
-		CHECK(!s.GetView(5500).HasRequest);
+		CHECK(s.GetView(5500).Requests.empty());
 	}
 
-	// A shared order can move us, and where we stand is what we have to be told about.
-	// Somebody ahead of us dropping out is the one way the turn reaches us without anybody casting, so the
-	// leave notice has to say so.
+	// Before anybody has an order there is no owner, so the commander is asked to start one.
+	void TestWithoutAnOrderTheCommanderIsAsked()
+	{
+		auto squad = [](Rezz::SquadRole aOurRole, bool aLeaderPresent)
+		{
+			Rezz::Session s;
+			s.OnAgentUpdate(Agent(A, 100, 7, 2, true, true), 0); // us
+			s.OnAgentUpdate(Agent(B, 200, 8, 4, true), 0);
+			s.OnAgentUpdate(Agent(C, 300, 9, 1, true), 0);
+			s.OnRole(A, aOurRole, 1, 0);
+			s.OnRole(B, aLeaderPresent ? Rezz::SquadRole::Leader : Rezz::SquadRole::Member, 1, 0);
+			s.OnRole(C, Rezz::SquadRole::Member, 1, 0);
+			s.OnChatMessage(C, "!rezzorder add", 1000);
+			return s.GetView(1500).Requests.size();
+		};
+
+		CHECK(squad(Rezz::SquadRole::Leader, false) == 1);      // we are the commander
+		CHECK(squad(Rezz::SquadRole::Member, true) == 0);       // the commander is asked, not us
+		CHECK(squad(Rezz::SquadRole::Lieutenant, true) == 0);   // ... even though we are a lieutenant
+		CHECK(squad(Rezz::SquadRole::Lieutenant, false) == 1);  // no commander running it: lieutenants answer
+		CHECK(squad(Rezz::SquadRole::Member, false) == 0);      // a plain member never answers
+	}
+
 	void TestLeaveSaysWhenTheTurnMovesToUs()
 	{
 		Rezz::Session s;
@@ -1685,13 +1886,22 @@ namespace
 		s.OnChatMessage(A, "!rezzorder b > a", 1100);
 		CHECK(s.TakeNotices().empty());
 
-		s.OnChatMessage(B, "?rezzorder", 2000);
+		// B is in the order already, so their asking to join settles itself.
+		s.OnChatMessage(B, "!rezzorder add", 2000);
+		CHECK(s.GetView(2100).Requests.empty());
+		CHECK(s.TakeNotices().empty());
+
+		// Somebody outside it asking does reach us, because the order is ours.
+		s.OnAgentUpdate(Agent(C, 300, 9, 1, true), 0);
+		s.OnRole(C, Rezz::SquadRole::Member, 1, 0);
+		s.OnChatMessage(C, "!rezzorder add", 2500);
 		std::vector<Rezz::Notice> notices = s.TakeNotices();
 		CHECK(notices.size() == 1 && notices[0].Kind == Rezz::NoticeKind::ShareRequested);
+		CHECK(s.GetView(2600).Requests.size() == 1);
 
-		// Nobody can answer a request without an order.
+		// A client that isn't in a squad at all has nothing to answer with.
 		Rezz::Session empty;
-		empty.OnChatMessage(B, "?rezzorder", 3000);
+		empty.OnChatMessage(B, "!rezzorder add", 3000);
 		CHECK(empty.TakeNotices().empty());
 	}
 
@@ -1749,6 +1959,8 @@ int main()
 		{ "character swaps around a swap", TestCharacterSwapsAroundASwap },
 		{ "share carries the bench", TestShareCarriesTheBench },
 		{ "bench is the last subgroup", TestBenchIsTheLastSubgroup },
+		{ "fight stats", TestFightStats },
+		{ "fight stats: waste and out of turn", TestFightStatsWasteAndOutOfTurn },
 		{ "effect counts as used after a cancel", TestEffectCountsAsUsedAfterACancel },
 		{ "chain swap off the bench", TestChainSwapOffTheBench },
 		{ "own paste applies to us", TestOwnPasteAppliesToUs },
@@ -1760,6 +1972,8 @@ int main()
 		{ "shared order from a leader is applied", TestSharedOrderFromLeaderIsApplied },
 		{ "own paste and requests", TestOwnPasteAndRequestsAreHandled },
 		{ "order request waits for an answer", TestOrderRequestWaitsForAnAnswer },
+		{ "join request places and removal", TestJoinRequestPlacesAndRemoval },
+		{ "without an order the commander is asked", TestWithoutAnOrderTheCommanderIsAsked },
 		{ "only the order's owner is asked", TestOnlyTheOrdersOwnerIsAsked },
 		{ "leave says when the turn moves to us", TestLeaveSaysWhenTheTurnMovesToUs },
 		{ "leave behind us says nothing extra", TestLeaveBehindUsSaysNothingExtra },

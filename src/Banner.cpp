@@ -28,12 +28,15 @@ namespace Banner
 			Kind        What;
 			std::string Text;
 			unsigned    SinceMs;
+			std::string Highlight; // a piece of Text (a player's name) drawn dimmer
 		};
 
 		struct Line
 		{
 			std::string Text;
 			float       Pixels;
+			size_t      HighlightFrom = std::string::npos; // into Text
+			size_t      HighlightLength = 0;
 		};
 
 		struct CountdownEntry
@@ -157,6 +160,13 @@ namespace Banner
 			return block;
 		}
 
+		// Names are drawn at two thirds of the message's colour, so they read as a name rather than as part of
+		// the sentence.
+		ImVec4 Dimmed(const ImVec4& aColor)
+		{
+			return ImVec4(aColor.x * 0.66f, aColor.y * 0.66f, aColor.z * 0.66f, aColor.w);
+		}
+
 		void DrawBlock(ImDrawList* aDraw, ImFont* aFont, const Block& aBlock, ImVec2 aPos, ImVec4 aColor, float aAlpha,
 			float aWrap, Style aStyle)
 		{
@@ -166,14 +176,40 @@ namespace Banner
 			{
 				const Line& line = aBlock.Lines[i];
 				ImVec2 at(aPos.x + std::round((aBlock.Size.x - aBlock.Sizes[i].x) * 0.5f), y);
-				if (aStyle == Style::Callout) { GlowText(aDraw, aFont, line.Pixels, at, aColor, aAlpha, line.Text.c_str(), aWrap); }
-				if (aStyle == Style::Callout || aStyle == Style::Text)
+
+				// A name inside the message is drawn in a dimmed colour, which takes three runs along the line.
+				// Only when the line wasn't wrapped: mid-line wrapping would put the runs in the wrong places.
+				bool split = line.HighlightFrom != std::string::npos && line.HighlightLength > 0 &&
+					(aWrap <= 0.0f || aBlock.Sizes[i].x <= aWrap);
+				std::string parts[3];
+				ImVec4 colours[3] = { aColor, Dimmed(aColor), aColor };
+				if (split)
 				{
-					RimmedText(aDraw, aFont, line.Pixels, at, Faded(aColor, aAlpha), rim, line.Text.c_str(), aWrap);
+					parts[0] = line.Text.substr(0, line.HighlightFrom);
+					parts[1] = line.Text.substr(line.HighlightFrom, line.HighlightLength);
+					parts[2] = line.Text.substr(line.HighlightFrom + line.HighlightLength);
 				}
 				else
 				{
-					aDraw->AddText(aFont, line.Pixels, at, Faded(aColor, aAlpha), line.Text.c_str(), nullptr, aWrap);
+					parts[0] = line.Text;
+				}
+
+				float x = at.x;
+				for (int part = 0; part < 3; part++)
+				{
+					if (parts[part].empty()) { continue; }
+					ImVec2 runAt(x, at.y);
+					const char* text = parts[part].c_str();
+					if (aStyle == Style::Callout) { GlowText(aDraw, aFont, line.Pixels, runAt, colours[part], aAlpha, text, 0.0f); }
+					if (aStyle == Style::Callout || aStyle == Style::Text)
+					{
+						RimmedText(aDraw, aFont, line.Pixels, runAt, Faded(colours[part], aAlpha), rim, text, split ? 0.0f : aWrap);
+					}
+					else
+					{
+						aDraw->AddText(aFont, line.Pixels, runAt, Faded(colours[part], aAlpha), text, nullptr, split ? 0.0f : aWrap);
+					}
+					x += aFont->CalcTextSizeA(line.Pixels, FLT_MAX, 0.0f, text).x;
 				}
 				y += aBlock.Sizes[i].y + aBlock.Gap;
 			}
@@ -266,7 +302,13 @@ namespace Banner
 
 		std::vector<Line> LinesOf(const Message& aMessage)
 		{
-			return { Line{ aMessage.Text, IsAlert(aMessage.What) ? AlertPixels() : InfoPixels() } };
+			Line line{ aMessage.Text, IsAlert(aMessage.What) ? AlertPixels() : InfoPixels() };
+			if (!aMessage.Highlight.empty())
+			{
+				line.HighlightFrom = aMessage.Text.find(aMessage.Highlight);
+				line.HighlightLength = aMessage.Highlight.size();
+			}
+			return { line };
 		}
 
 		// The figures are what has to be read at a glance, so they are the big line. Which of the two comes first
@@ -295,7 +337,7 @@ namespace Banner
 		}
 	}
 
-	void Show(Kind aKind, const std::string& aText, unsigned aNowMs)
+	void Show(Kind aKind, const std::string& aText, unsigned aNowMs, const std::string& aHighlight)
 	{
 		if (aText.empty()) { return; }
 		for (auto it = s_Messages.begin(); it != s_Messages.end(); ++it)
@@ -308,7 +350,7 @@ namespace Banner
 				break;
 			}
 		}
-		s_Messages.push_front(Message{ aKind, aText, aNowMs });
+		s_Messages.push_front(Message{ aKind, aText, aNowMs, aHighlight });
 		while (s_Messages.size() > kMaxKept) { s_Messages.pop_back(); }
 	}
 

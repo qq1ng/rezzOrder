@@ -106,10 +106,10 @@ namespace Live
 		s_Session.DismissShare();
 	}
 
-	void ClearRequest()
+	void ClearRequest(const std::string& aAccount)
 	{
 		std::scoped_lock lock(s_Mutex);
-		s_Session.ClearRequest();
+		s_Session.ClearRequest(aAccount);
 	}
 
 	void Tick()
@@ -123,6 +123,12 @@ namespace Live
 	{
 		std::scoped_lock lock(s_Mutex);
 		s_Session.SetOrder(aAccounts);
+	}
+
+	std::vector<Rezz::FightStat> GetFights()
+	{
+		std::scoped_lock lock(s_Mutex);
+		return s_Session.Fights();
 	}
 
 	void SetBench(int aSubgroup)

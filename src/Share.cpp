@@ -122,12 +122,33 @@ namespace Rezz::Share
 		std::string text = Trim(aText.size() > kMaxTextChars ? aText.substr(0, kMaxTextChars) : aText);
 		std::string lower = Lower(text);
 
-		// "?rezzorder" asks; "!rezzorder ..." tells.
-		if (StartsWith(lower, kRequestText)) { message.What = Kind::Request; return message; }
+		// "?rezzorder" is the old way of asking to be put in; "!rezzorder ..." tells or asks.
+		if (StartsWith(lower, kRequestText)) { message.What = Kind::Add; return message; }
 		if (!StartsWith(lower, kPrefix)) { return message; }
 
 		std::string rest = Trim(text.substr(std::string(kPrefix).size()));
-		if (rest.empty() || rest == "?") { message.What = Kind::Request; return message; }
+		if (rest.empty() || rest == "?") { message.What = Kind::Add; return message; }
+
+		// "add", "add 3", "add first", "add last", "remove": about the sender, not a list of names.
+		std::string first = Lower(rest.substr(0, rest.find_first_of(" \t")));
+		if (first == kRemoveWord || first == "leave" || first == "out")
+		{
+			message.What = Kind::Remove;
+			return message;
+		}
+		if (first == kAddWord || first == "join" || first == "me")
+		{
+			message.What = Kind::Add;
+			std::string where = Lower(Trim(rest.substr(first.size())));
+			if (where == "first" || where == "top") { message.Place = 1; }
+			else if (!where.empty() && where.size() <= 2 &&
+				std::all_of(where.begin(), where.end(), [](unsigned char c) { return std::isdigit(c) != 0; }))
+			{
+				int place = std::stoi(where);
+				message.Place = place >= 1 && place <= kMaxPlace ? place : 0;
+			}
+			return message; // "last", anything else: no preference, which means the end
+		}
 
 		// Both separators are accepted: people type what they are used to.
 		std::string token;

@@ -69,6 +69,8 @@ inline constexpr ReviveSkill kReviveSkills[] = {
 inline constexpr uint32_t kIllusionOfLifeEffect = 10346;
 
 const ReviveSkill* FindReviveSkill(uint32_t aSkillId);
+// How many downed allies one cast of this group's skill picks up in WvW. 0 for an unknown group.
+uint8_t GroupTargets(ReviveGroup aGroup);
 const ReviveGroupInfo& GetGroupInfo(ReviveGroup aGroup);
 
 // Whether a stopped cast spent the skill. Rule from Phase 0 (notes/phase0-results.md: 0 contradictions over

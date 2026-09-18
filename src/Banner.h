@@ -33,7 +33,9 @@ namespace Banner
 	const char* StyleName(Style aStyle);
 
 	// Shows a message. The same text again while it is still up only restarts its time instead of stacking.
-	void Show(Kind aKind, const std::string& aText, unsigned aNowMs);
+	// aHighlight is a piece of the text, normally the player's name, drawn dimmer so it stands out from the
+	// rest of the message.
+	void Show(Kind aKind, const std::string& aText, unsigned aNowMs, const std::string& aHighlight = {});
 
 	// An Illusion of Life countdown for this frame: the seconds left in large figures, the players' names in
 	// smaller ones. Call once per countdown, soonest first, every frame they should show. Several sit side by

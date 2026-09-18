@@ -20,7 +20,11 @@
 // shortened to a unique prefix when the line would not fit in a chat message.
 //
 // A trailing "*" marks a precast player: somebody who may spend their revive whenever they see a fight
-// about to go badly, rather than waiting for their turn. "?rezzorder" asks the squad for the order.
+// about to go badly, rather than waiting for their turn.
+//
+// Players ask to be put in the order with "!rezzorder add", optionally naming the place they would like
+// ("!rezzorder add 3", "add first", "add last"). Only the client whose order it is answers, and the player
+// running it decides the place. "!rezzorder remove" takes the sender out, which needs nobody's approval.
 //
 // A last entry "bench:5" (or "bench:last") names the squad's bench subgroup, for bench swaps. It is written as one more entry
 // so a client that doesn't know it takes it for a name matching nobody and still reads the players; account
@@ -30,7 +34,12 @@ namespace Rezz::Share
 	// The game's chat limit. Anything longer would be cut off by the client mid-paste.
 	inline constexpr size_t kMaxChatChars = 199;
 	inline constexpr const char* kPrefix      = "!rezzorder";
+	// The old way of asking, still understood: it means the same as "!rezzorder add".
 	inline constexpr const char* kRequestText = "?rezzorder";
+	inline constexpr const char* kAddWord     = "add";
+	inline constexpr const char* kRemoveWord  = "remove";
+	// A place asked for beyond this is a typo rather than a wish, and is taken as the end of the order.
+	inline constexpr int kMaxPlace = 60;
 	inline constexpr char kPrecastMark = '*';
 	inline constexpr const char* kBenchToken = "bench:";
 	inline constexpr uint16_t kMaxSubgroup = 15;
@@ -53,7 +62,9 @@ namespace Rezz::Share
 	std::string Encode(const std::vector<std::string>& aOrder, const std::vector<std::string>& aPrecast,
 		const std::vector<RosterMember>& aRoster, uint16_t aBench = 0);
 
-	enum class Kind : uint8_t { None, Order, Request };
+	// Order: a whole order. Add: the sender wants in, Place is where they asked to go (0: no preference).
+	// Remove: the sender wants out.
+	enum class Kind : uint8_t { None, Order, Add, Remove };
 
 	struct Entry
 	{
@@ -64,6 +75,7 @@ namespace Rezz::Share
 	struct Message
 	{
 		Kind               What = Kind::None;
+		int                Place = 0;   // for Add: 1-based place asked for, 0 none given (the end)
 		std::vector<Entry> Entries; // in the order they were named
 		uint16_t           Bench = 0; // bench subgroup (1-15 or kBenchLast), 0 none given
 	};

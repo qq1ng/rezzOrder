@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstring>
 #include <deque>
+#include <map>
 #include <unordered_map>
 
 #include "imgui/imgui.h"
@@ -22,10 +23,12 @@
 namespace OrderUi
 {
 	bool              ShowEditor = false;
+	bool              ShowStats = false;
 	FrameInfo         LastFrame;
 	FrameInfo         LastEditorFrame;
 	FrameInfo         LastShareFrame;
 	FrameInfo         LastRequestFrame;
+	FrameInfo         LastStatsFrame;
 	int               ShotMenu = -1;
 	std::atomic<bool> TextInputActive{false};
 	std::atomic<bool> EditorToggleRequested{false};
@@ -57,10 +60,13 @@ namespace OrderUi
 		{
 			std::string Text;
 			unsigned    TimeMs;
+			std::string Highlight; // the player's name inside Text, drawn dimmer
+			bool        OpensStats = false; // a fight summary: clicking it opens the stats window
 		};
 
 		std::deque<TimedNotice> s_Notices;
 		unsigned s_LastNowMs = 0;
+		std::map<std::string, int> s_RequestPlace; // place picked for each player asking to join, 0 not picked yet
 		bool s_MenuOpen = false; // one of our popups was open last frame: keep taking input while it is
 		bool s_GripHeld = false; // the corner grip is being dragged
 		bool s_GripHot  = false; // ... or hovered: the window must not move out from under it
@@ -407,7 +413,6 @@ namespace OrderUi
 				static_cast<uint16_t>(Settings::Current.Bench));
 			ImGui::SetClipboardText(line.c_str());
 			AddNotice("copied: " + line + " - paste it in squad chat", s_LastNowMs);
-			Live::ClearRequest();
 		}
 
 		void CopyOrder(const Rezz::SessionView& aView)
@@ -579,6 +584,7 @@ namespace OrderUi
 			PresetMenu(aView);
 			CopyOrderItem(aView);
 			if (ImGui::MenuItem("Open order editor")) { ShowEditor = true; }
+			if (ImGui::MenuItem("Fight stats")) { ShowStats = true; }
 			if (ImGui::MenuItem("Hide overlay")) { Settings::Current.OverlayVisible = false; Settings::MarkDirty(); }
 			ImGui::Separator();
 			StyleMenu();
@@ -842,6 +848,7 @@ namespace OrderUi
 			PresetMenu(view);
 			CopyOrderItem(view);
 			if (ImGui::MenuItem("Open order editor")) { ShowEditor = true; }
+			if (ImGui::MenuItem("Fight stats")) { ShowStats = true; }
 			ImGui::Separator();
 			StyleMenu();
 			ImGui::EndPopup();
@@ -1566,7 +1573,31 @@ namespace OrderUi
 			{
 				Fonts::Push(s.OverlayScale);
 				ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + LastFrame.Width - padding.x * 2);
-				for (const TimedNotice& notice : s_Notices) { ImGui::TextColored(kOrange, "%s", notice.Text.c_str()); }
+				for (const TimedNotice& notice : s_Notices)
+				{
+					if (notice.OpensStats)
+					{
+						// The line after a fight is a way into the stats, not just a message.
+						ImGui::PushID(&notice);
+						if (ImGui::Selectable(notice.Text.c_str())) { ShowStats = true; }
+						if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Open the fight stats"); }
+						ImGui::PopID();
+						continue;
+					}
+					size_t at = notice.Highlight.empty() ? std::string::npos : notice.Text.find(notice.Highlight);
+					if (at == std::string::npos)
+					{
+						ImGui::TextColored(kOrange, "%s", notice.Text.c_str());
+						continue;
+					}
+					// The name in a dimmer colour, so it reads apart from the rest of the line.
+					const ImVec4 dim(kOrange.x * 0.66f, kOrange.y * 0.66f, kOrange.z * 0.66f, kOrange.w);
+					std::string before = notice.Text.substr(0, at);
+					std::string after = notice.Text.substr(at + notice.Highlight.size());
+					if (!before.empty()) { ImGui::TextColored(kOrange, "%s", before.c_str()); ImGui::SameLine(0.0f, 0.0f); }
+					ImGui::TextColored(dim, "%s", notice.Highlight.c_str());
+					if (!after.empty()) { ImGui::SameLine(0.0f, 0.0f); ImGui::TextColored(kOrange, "%s", after.c_str()); }
+				}
 				ImGui::PopTextWrapPos();
 				Fonts::Pop();
 				LastFrame.MessagesX = ImGui::GetWindowPos().x;
@@ -2098,60 +2129,263 @@ namespace OrderUi
 
 		// Somebody typed "!rezz?" in squad chat. Addons cannot answer by themselves, so this asks whether to
 		// put the order on the clipboard; pasting it is still the player's keystroke.
+		// One fight's numbers: the four that answer "how did we do", then a row per player.
+		void RenderStats(const Rezz::SessionView& aView, const RosterIndex& aRoster, const Context& aContext)
+		{
+			LastStatsFrame = FrameInfo{};
+			if (!ShowStats || !aContext.IsGameplay) { return; }
+			std::vector<Rezz::FightStat> fights = Live::GetFights();
+
+			ArcStyle::Push();
+			ImGui::SetNextWindowSize(ImVec2(0, 0), ImGuiCond_Always); // as small as the table needs
+			if (ImGui::Begin("Fight stats###rezzorder_stats", &ShowStats, ImGuiWindowFlags_AlwaysAutoResize))
+			{
+				if (fights.empty())
+				{
+					ImGui::TextColored(kGrey, "No fights yet this session.");
+					ImGui::TextColored(kGrey, "A fight is counted once the squad has been out of combat for 20 seconds.");
+				}
+				else
+				{
+					// Newest first: the fight just finished is the one being asked about.
+					static int s_Picked = 0;
+					s_Picked = std::clamp(s_Picked, 0, static_cast<int>(fights.size()) - 1);
+					const Rezz::FightStat& fight = fights[fights.size() - 1 - static_cast<size_t>(s_Picked)];
+
+					ImGui::SetNextItemWidth(220);
+					std::string current = "Fight " + std::to_string(fight.Number) + " (" +
+						std::to_string(fight.LengthMs() / 1000) + "s)";
+					if (ImGui::BeginCombo("##fight", current.c_str()))
+					{
+						for (int i = 0; i < static_cast<int>(fights.size()); i++)
+						{
+							const Rezz::FightStat& other = fights[fights.size() - 1 - static_cast<size_t>(i)];
+							std::string label = "Fight " + std::to_string(other.Number) + " - " + other.Summary();
+							if (ImGui::Selectable(label.c_str(), i == s_Picked)) { s_Picked = i; }
+						}
+						ImGui::EndCombo();
+					}
+					ImGui::SameLine();
+					if (ImGui::Button("Copy"))
+					{
+						std::string text = "Fight " + std::to_string(fight.Number) + ": " + fight.Summary() + "\n";
+						for (const Rezz::PlayerStat& player : fight.Players)
+						{
+							text += Rezz::DisplayAccount(player.Account) + ": revived " + std::to_string(player.Revived) +
+								", used " + std::to_string(player.Used);
+							if (player.OutOfTurn > 0) { text += ", early " + std::to_string(player.OutOfTurn); }
+							if (player.Overlapped > 0) { text += ", overlapped " + std::to_string(player.Overlapped); }
+							if (player.OnNothing > 0) { text += ", on nothing " + std::to_string(player.OnNothing); }
+							if (player.TooLate > 0) { text += ", too late " + std::to_string(player.TooLate); }
+							if (player.MissedTurns > 0) { text += ", missed turn " + std::to_string(player.MissedTurns); }
+							text += "\n";
+						}
+						ImGui::SetClipboardText(text.c_str());
+						AddNotice("fight stats copied", s_LastNowMs);
+					}
+
+					ImGui::Spacing();
+					ImGui::TextColored(kGreen, "%d", fight.Revived);
+					ImGui::SameLine(); ImGui::TextUnformatted("revived");
+					ImGui::SameLine(); ImGui::TextColored(kGrey, "of");
+					ImGui::SameLine(); ImGui::TextColored(kYellow, "%d", fight.Possible);
+					ImGui::SameLine(); ImGui::TextUnformatted("possible");
+					ImGui::SameLine(); ImGui::TextColored(kGrey, "|");
+					ImGui::SameLine(); ImGui::Text("%d downs", fight.Downs);
+					ImGui::SameLine(); ImGui::TextColored(kGrey, "|");
+					ImGui::SameLine(); ImGui::Text("%d rallied", fight.Rallied);
+					ImGui::SameLine(); ImGui::TextColored(kRed, "%d died", fight.Died);
+					if (ImGui::IsItemHovered())
+					{
+						ImGui::SetTooltip("%s", "Possible: downs that happened while somebody's revive was ready, "
+							"counting how many allies those skills could pick up. It cannot know whether they were "
+							"in range, so treat it as the best case.");
+					}
+
+					// Fixed columns, so the numbers sit next to each other instead of being spread across the
+					// window, and the window is only as wide as they need.
+					// Fixed widths from the widest the column can hold, so the numbers stay side by side and the
+					// window is no wider than the table needs.
+					// Name, the widest thing the column holds, and what the header says when hovered.
+					struct Column { const char* Name; const char* Widest; const char* Tip; };
+					static const Column kColumns[] = {
+						{ "player",      "PlayerNameXYZ", "squad member with a revive" },
+						{ "revived",     "00",            "allies their skill picked up" },
+						{ "casts",       "00",            "revive skills actually spent" },
+						{ "early",       "00",            "spent out of turn" },
+						{ "overlapped",  "00",            "another revive got there first" },
+						{ "on nothing",  "00",            "cast while nobody was down" },
+						{ "too late",    "00",            "cast, but nobody got up" },
+						{ "missed turn", "00",            "their turn, never cast" },
+						{ "cancelled",   "00",            "cast started, never finished" },
+						{ "react",       "00.0s",         "average down to cast" },
+					};
+					float pad = ImGui::GetStyle().CellPadding.x * 2.0f;
+					if (ImGui::BeginTable("stats", IM_ARRAYSIZE(kColumns), ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+						ImGuiTableFlags_SizingFixedFit))
+					{
+						for (const Column& column : kColumns)
+						{
+							float width = std::max(ImGui::CalcTextSize(column.Name).x, ImGui::CalcTextSize(column.Widest).x) + pad;
+							ImGui::TableSetupColumn(column.Name, ImGuiTableColumnFlags_WidthFixed, width);
+						}
+						// Drawn by hand rather than with TableHeadersRow, so each header can say what it counts.
+						ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+						for (int i = 0; i < IM_ARRAYSIZE(kColumns); i++)
+						{
+							ImGui::TableSetColumnIndex(i);
+							ImGui::TableHeader(kColumns[i].Name);
+							if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", kColumns[i].Tip); }
+						}
+						for (const Rezz::PlayerStat& player : fight.Players)
+						{
+							const Rezz::RosterMember* member = Find(aRoster, player.Account);
+							ImGui::TableNextRow();
+							ImGui::TableNextColumn();
+							ProfessionIcon(player.Account, member);
+							ImGui::SameLine();
+							ImGui::TextUnformatted(PlayerName(player.Account, member).c_str());
+							ImGui::TableNextColumn();
+							if (player.Revived > 0) { ImGui::TextColored(kGreen, "%d", player.Revived); }
+							else { ImGui::TextColored(kGrey, "0"); }
+							ImGui::TableNextColumn();
+							ImGui::Text("%d", player.Used);
+							ImGui::TableNextColumn();
+							// Casting out of turn is a misplay of its own, so it gets its own column rather than
+							// hiding beside the number of casts.
+							if (player.OutOfTurn > 0) { ImGui::TextColored(kOrange, "%d", player.OutOfTurn); }
+							else { ImGui::TextColored(kGrey, "-"); }
+							ImGui::TableNextColumn();
+							if (player.Overlapped > 0) { ImGui::TextColored(kOrange, "%d", player.Overlapped); }
+							else { ImGui::TextColored(kGrey, "-"); }
+							ImGui::TableNextColumn();
+							if (player.OnNothing > 0) { ImGui::TextColored(kOrange, "%d", player.OnNothing); }
+							else { ImGui::TextColored(kGrey, "-"); }
+							ImGui::TableNextColumn();
+							if (player.TooLate > 0) { ImGui::TextColored(kOrange, "%d", player.TooLate); }
+							else { ImGui::TextColored(kGrey, "-"); }
+							ImGui::TableNextColumn();
+							if (player.MissedTurns > 0) { ImGui::TextColored(kOrange, "%d", player.MissedTurns); }
+							else { ImGui::TextColored(kGrey, "-"); }
+							if (player.LetDie > 0 && ImGui::IsItemHovered())
+							{
+								ImGui::SetTooltip("%d of those allies died", player.LetDie);
+							}
+							ImGui::TableNextColumn();
+							int cancels = player.ByHand + player.Interrupted + player.Movement + player.WentDown;
+							if (cancels > 0)
+							{
+								ImGui::Text("%d", cancels);
+								if (ImGui::IsItemHovered())
+								{
+									ImGui::SetTooltip("by hand %d, interrupted %d, moved or dodged %d, went down %d",
+										player.ByHand, player.Interrupted, player.Movement, player.WentDown);
+								}
+							}
+							else { ImGui::TextColored(kGrey, "-"); }
+							ImGui::TableNextColumn();
+							if (player.LateCasts > 0)
+							{
+								ImGui::Text("%.1fs", static_cast<double>(player.AverageLateMs()) / 1000.0);
+								if (ImGui::IsItemHovered())
+								{
+									ImGui::SetTooltip("Average from an ally going down to their cast. Slowest %.1fs.",
+										static_cast<double>(player.SlowestMs) / 1000.0);
+								}
+							}
+							else { ImGui::TextColored(kGrey, "-"); }
+						}
+						ImGui::EndTable();
+					}
+					ImGui::TextColored(kGrey, "Only what your client could see: players out of ArcDPS range are missing.");
+				}
+			}
+			LastStatsFrame.Drawn = true;
+			LastStatsFrame.Layout = "stats";
+			LastStatsFrame.X = ImGui::GetWindowPos().x;
+			LastStatsFrame.Y = ImGui::GetWindowPos().y;
+			LastStatsFrame.Width = ImGui::GetWindowSize().x;
+			LastStatsFrame.Height = ImGui::GetWindowSize().y;
+			ImGui::End();
+			ArcStyle::Pop();
+			(void)aView;
+		}
+
 		void RenderRequest(const Rezz::SessionView& aView, const RosterIndex& aRoster, const Context& aContext)
 		{
 			LastRequestFrame = FrameInfo{};
-			if (!aView.HasRequest || !aContext.IsGameplay) { return; }
+			if (aView.Requests.empty() || !aContext.IsGameplay) { return; }
 
 			ArcStyle::Push();
 			ImGui::SetNextWindowSize(ImVec2(0, 0), ImGuiCond_Always);
 			ImVec2 screen = ImGui::GetIO().DisplaySize;
 			ImGui::SetNextWindowPos(ImVec2(screen.x * 0.5f, screen.y * 0.35f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-			if (ImGui::Begin("Revive order asked for###rezzorder_request", nullptr, ImGuiWindowFlags_AlwaysAutoResize |
+			if (ImGui::Begin("Players asking to join the order###rezzorder_request", nullptr, ImGuiWindowFlags_AlwaysAutoResize |
 				ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings))
 			{
-				const Rezz::RosterMember* asker = Find(aRoster, aView.RequestFrom);
-				std::string askerName = PlayerName(aView.RequestFrom, asker);
-				ImGui::TextColored(kYellow, "%s", askerName.c_str());
-				ImGui::SameLine();
-				ImGui::TextUnformatted("asked for the revive order.");
+				ImGui::TextColored(kGrey, "Only you are asked: the order is yours. Adding somebody copies the new order,");
+				ImGui::TextColored(kGrey, "which still has to be pasted in squad chat for the rest of the squad.");
+				ImGui::Separator();
 
-				// Somebody asking for the order has usually just joined, so the answer is normally to put
-				// them in it first. The line below is what the left-hand button copies.
-				bool inOrder = std::find(aView.Order.begin(), aView.Order.end(), aView.RequestFrom) != aView.Order.end();
-				std::vector<std::string> withThem = aView.Order;
-				if (!inOrder) { withThem.push_back(aView.RequestFrom); }
-				if (!inOrder)
+				for (const Rezz::JoinRequest& request : aView.Requests)
 				{
-					ProfessionIcon(aView.RequestFrom, asker);
+					const Rezz::RosterMember* asker = Find(aRoster, request.Account);
+					std::string askerName = PlayerName(request.Account, asker);
+					ImGui::PushID(request.Account.c_str());
+
+					ProfessionIcon(request.Account, asker);
 					ImGui::SameLine();
-					ImGui::TextColored(kOrange, "%s is not in the order.", askerName.c_str());
+					ImGui::TextColored(kYellow, "%s", askerName.c_str());
+					ImGui::SameLine();
+					if (request.Place > 0) { ImGui::Text("asked to be %d. in the order.", request.Place); }
+					else { ImGui::TextUnformatted("asked to be in the order."); }
 					if (asker && asker->Profession != 0 && !Rezz::IsReviveProfession(asker->Profession))
 					{
 						ImGui::SameLine();
 						ImGui::TextColored(kRed, "(%s has no revive skill)", Rezz::ProfessionShortName(asker->Profession));
 					}
-				}
-				ImGui::TextColored(kGrey, "%s", Rezz::Share::Encode(withThem, aView.Precast, aView.Roster, aView.Bench).c_str());
 
-				if (inOrder)
-				{
-					if (ImGui::Button("Copy it for squad chat")) { CopyOrder(aView); }
-				}
-				else
-				{
-					if (ImGui::Button(("Add " + askerName + " and copy").c_str()))
+					// Where they go is the owner's call; what they asked for is only what the box starts on.
+					int places = static_cast<int>(aView.Order.size());
+					int& chosen = s_RequestPlace[request.Account];
+					if (chosen == 0) { chosen = request.Place > 0 ? std::min(request.Place, places + 1) : places + 1; }
+					std::string label = chosen <= 1 ? "1. (first)"
+						: "after " + PlayerName(aView.Order[static_cast<size_t>(chosen) - 2],
+							Find(aRoster, aView.Order[static_cast<size_t>(chosen) - 2])) + " (" + std::to_string(chosen) + ".)";
+					ImGui::SetNextItemWidth(ImGui::GetFontSize() * 12.0f);
+					if (ImGui::BeginCombo("##place", label.c_str()))
+					{
+						for (int place = 1; place <= places + 1; place++)
+						{
+							std::string option = place == 1 ? "1. (first)"
+								: "after " + PlayerName(aView.Order[static_cast<size_t>(place) - 2],
+									Find(aRoster, aView.Order[static_cast<size_t>(place) - 2])) + " (" + std::to_string(place) + ".)";
+							if (ImGui::Selectable(option.c_str(), place == chosen)) { chosen = place; }
+						}
+						ImGui::EndCombo();
+					}
+
+					std::vector<std::string> withThem = aView.Order;
+					withThem.insert(withThem.begin() + std::min<size_t>(static_cast<size_t>(chosen) - 1, withThem.size()), request.Account);
+					ImGui::SameLine();
+					if (ImGui::Button("Add and copy"))
 					{
 						ApplyOrder(withThem);
 						CopyOrderLine(withThem, aView.Roster);
+						Live::ClearRequest(request.Account);
+						s_RequestPlace.erase(request.Account);
 					}
 					ImGui::SameLine();
-					if (ImGui::Button("Copy without adding")) { CopyOrder(aView); }
+					if (ImGui::Button("Ignore"))
+					{
+						Live::ClearRequest(request.Account);
+						s_RequestPlace.erase(request.Account);
+					}
+					ImGui::TextColored(kGrey, "%s", Rezz::Share::Encode(withThem, aView.Precast, aView.Roster, aView.Bench).c_str());
+					ImGui::PopID();
 				}
-				ImGui::SameLine();
-				if (ImGui::Button("Not now")) { Live::ClearRequest(); }
-				ImGui::SameLine();
-				ImGui::TextColored(kGrey, "(then paste it in squad chat)");
+
+				if (aView.Requests.size() > 1 && ImGui::Button("Ignore all")) { Live::ClearRequest(); }
 
 				LastRequestFrame.Drawn = true;
 				LastRequestFrame.Layout = "request";
@@ -2215,9 +2449,9 @@ namespace OrderUi
 		Live::SetSubstitutes(Settings::Current.Substitutes);
 	}
 
-	void AddNotice(const std::string& aText, unsigned aNowMs)
+	void AddNotice(const std::string& aText, unsigned aNowMs, const std::string& aHighlight, bool aOpensStats)
 	{
-		s_Notices.push_back(TimedNotice{ aText, aNowMs });
+		s_Notices.push_back(TimedNotice{ aText, aNowMs, aHighlight, aOpensStats });
 		while (s_Notices.size() > kNoticeLimit) { s_Notices.pop_front(); }
 	}
 
@@ -2287,8 +2521,12 @@ namespace OrderUi
 				for (const Rezz::IllusionTarget& target : aView.Illusions)
 				{
 					// For whoever could revive them again, and always for the mesmer who cast it: they are the one
-					// watching that player, even with their own revive spent on them.
-					if (!aView.SelfCanRevive && !target.OurCast) { continue; }
+					// watching that player, even with their own revive spent on them. Somebody who is not in the
+					// order is sitting this one out (the bench takes them out of it), and a countdown for a fight
+					// they are not in is noise, so it stays off their screen unless it was their own cast.
+					bool ours = aView.SelfAccount.empty() ||
+						std::find(aView.Order.begin(), aView.Order.end(), aView.SelfAccount) != aView.Order.end();
+					if (!target.OurCast && (!ours || !aView.SelfCanRevive)) { continue; }
 					pending.push_back(Pending{ target.EndsInMs, PlayerName(target.Account, Find(aRoster, target.Account)) });
 				}
 			}
@@ -2338,6 +2576,7 @@ namespace OrderUi
 	{
 		s_Notices.clear();
 		s_IllusionShown.clear();
+		s_RequestPlace.clear();
 	}
 
 	void Render(const Context& aContext)
@@ -2400,6 +2639,7 @@ namespace OrderUi
 		}
 		{ Timing::Step step("turn window"); RenderOverlay(view, roster, aContext); }
 		{ Timing::Step step("share windows"); RenderShare(view, roster, aContext); RenderRequest(view, roster, aContext); }
+		{ Timing::Step step("fight stats"); RenderStats(view, roster, aContext); }
 		{ Timing::Step step("order editor"); RenderEditor(view, roster, aContext); }
 		{ Timing::Step step("settings file"); Settings::Flush(aContext.NowMs); }
 	}
@@ -2434,6 +2674,27 @@ namespace OrderUi
 		}
 
 		// Size and place of one group of banners, on one line.
+		// A "(?)" beside a setting, with the explanation in its tooltip. The options page used to carry its
+		// explanations as grey paragraphs, which made the settings themselves hard to find.
+		void Help(const char* aText)
+		{
+			ImGui::SameLine();
+			ImGui::TextDisabled("(?)");
+			if (!ImGui::IsItemHovered()) { return; }
+			ImGui::BeginTooltip();
+			ImGui::PushTextWrapPos(ImGui::GetFontSize() * 28.0f);
+			ImGui::TextUnformatted(aText);
+			ImGui::PopTextWrapPos();
+			ImGui::EndTooltip();
+		}
+
+		// One section of the options page. They all start closed, so the page is a list of headings until you
+		// open what you came for; ImGui remembers which ones you left open.
+		bool Section(const char* aName)
+		{
+			return ImGui::CollapsingHeader(aName);
+		}
+
 		void BannerGroupOptions(const char* aWhat, const char* aHint, float* aSize, float* aX, float* aY)
 		{
 			ImGui::PushID(aWhat);
@@ -2477,7 +2738,7 @@ namespace OrderUi
 	void Options()
 	{
 		Settings::Values& s = Settings::Current;
-		ImGui::TextUnformatted("Revive order");
+
 		if (ImGui::Button("Open order editor (Ctrl+Shift+O)")) { ShowEditor = true; }
 		ImGui::SameLine();
 		if (Rezz::Demo::Running())
@@ -2486,228 +2747,249 @@ namespace OrderUi
 			ImGui::SameLine();
 			ImGui::TextColored(kOrange, "demo squad: not real players");
 		}
-		else if (ImGui::Button("Demo squad"))
+		else
 		{
-			Rezz::Demo::Start(Live::GetView().SelfAccount, s_LastNowMs);
-		}
-		if (ImGui::IsItemHovered())
-		{
-			ImGui::SetTooltip("A made-up squad fighting on a loop, to place and size the window.");
-		}
-		ImGui::Separator();
-		ImGui::TextUnformatted("Turn window");
-		ImGui::TextColored(kGrey, "The same settings are on the window itself: right-click it > style.");
-		ImGui::TextColored(kGrey, "Drag the corner grip to size it, Ctrl+Shift+L locks it (Ctrl+Shift edits it while locked).");
-		WindowOptions();
-
-		ImGui::Separator();
-		ImGui::TextUnformatted("Look and names");
-		if (ImGui::Checkbox("Match ArcDPS appearance (colours, padding, font size)", &s.MatchArcDps)) { Settings::MarkDirty(); }
-		if (s.MatchArcDps)
-		{
-			const ArcStyle::Values& arc = ArcStyle::Get();
-			if (arc.Ok) { ImGui::TextColored(kGrey, "Read from %s", ArcStyle::SourcePath()); }
-			else { ImGui::TextColored(kGrey, "arcdps.ini not found yet: using the Nexus look."); }
+			if (ImGui::Button("Demo squad")) { Rezz::Demo::Start(Live::GetView().SelfAccount, s_LastNowMs); }
+			Help("A made-up squad fighting on a loop, so the window can be placed and the alerts tried out "
+				"without being in a squad.");
 		}
 
-		static const char* kFontNames[] = { "Nexus font", "ArcDPS font", "Font file..." };
-		int font = static_cast<int>(s.Font);
-		ImGui::SetNextItemWidth(200);
-		if (ImGui::Combo("Overlay font", &font, kFontNames, IM_ARRAYSIZE(kFontNames)))
+		if (Section("Turn window"))
 		{
-			s.Font = static_cast<Settings::FontSource>(font);
-			Settings::MarkDirty();
-		}
-		if (s.Font == Settings::FontSource::File)
-		{
-			char path[260] = {};
-			strncpy_s(path, s.FontFile.c_str(), _TRUNCATE);
-			ImGui::SetNextItemWidth(400);
-			if (ImGui::InputText("TTF file", path, sizeof(path))) { s.FontFile = path; Settings::MarkDirty(); }
-		}
-		else if (s.Font == Settings::FontSource::ArcDps)
-		{
-			ImGui::TextColored(kGrey, "Uses arcdps_font.ttf from the game folder, or the font ArcDPS shows by default.");
-		}
-		if (ImGui::Checkbox("Always use account names", &s.PreferAccount)) { Settings::MarkDirty(); }
-		ImGui::TextColored(kGrey, "Otherwise character names are used, except in Edge of the Mists where players from other worlds show a WvW rank.");
-
-		ImGui::Separator();
-		ImGui::TextUnformatted("Notifications");
-		ImGui::TextColored(kGrey, "Every message is shown next to the turn window. These pick the ones that also get a");
-		ImGui::TextColored(kGrey, "banner across the top of the screen.");
-		BannerToggle("a player in the order leaves or is replaced", &s.BannerOnLeave,
-			"\"3. PlayerXYZ left the squad - you are up now\"");
-		BannerToggle("a player swaps profession", &s.BannerOnSwap,
-			"\"3. PlayerXYZ swapped to Ranger (no revive skill)\"");
-		BannerToggle("somebody shares an order", &s.BannerOnShare,
-			"\"PlayerXYZ shared a revive order (6 players) - you are now 2. (was 4.)\"");
-		BannerToggle("somebody asks for the order", &s.BannerOnAsk,
-			"\"PlayerXYZ asked for the revive order\"");
-
-		// The banners are drawn by the addon rather than sent to Nexus: Nexus' own alert has no size, place or time
-		// on screen to set. The top middle of the screen is where the game shows the selected target, so both
-		// groups can be moved clear of it.
-		ImGui::Spacing();
-		static const char* kBannerStyles[static_cast<int>(Banner::Style::Count)] = {
-			"text", "plate", "window", "callout" };
-		ImGui::SetNextItemWidth(120);
-		if (ImGui::Combo("banner style", &s.BannerStyle, kBannerStyles, IM_ARRAYSIZE(kBannerStyles))) { Settings::MarkDirty(); }
-		ImGui::SameLine();
-		ImGui::SetNextItemWidth(90);
-		if (ImGui::InputFloat("seconds on screen", &s.BannerSeconds, 0.5f, 1.0f, "%.1f"))
-		{
-			s.BannerSeconds = std::clamp(s.BannerSeconds, 1.0f, 60.0f);
-			Settings::MarkDirty();
-		}
-		TextInputActive = TextInputActive || ImGui::IsItemActive();
-
-		BannerGroupOptions("messages", "Somebody left the squad, an order was shared, a problem with the addon's setup.",
-			&s.BannerInfoSize, &s.BannerInfoX, &s.BannerInfoY);
-		ImGui::SameLine();
-		if (ImGui::ColorEdit3("##messagecolour", s.BannerInfoColor, ImGuiColorEditFlags_NoInputs)) { Settings::MarkDirty(); }
-		ImGui::SameLine();
-		if (ImGui::Button("Try##messages"))
-		{
-			Banner::Show(Banner::Kind::Info, "3. PlayerXYZ left the squad, out of the order - you are up now", s_LastNowMs);
+			ImGui::TextColored(kGrey, "Right-click the window for the same settings. Drag its corner to size it.");
+			ImGui::TextColored(kGrey, "Ctrl+Shift+L locks it; hold Ctrl+Shift to move or edit it while locked.");
+			WindowOptions();
 		}
 
-		BannerGroupOptions("alerts", "Your turn, backup, and the Illusion of Life countdown.",
-			&s.BannerAlertSize, &s.BannerAlertX, &s.BannerAlertY);
-		ImGui::SameLine();
-		if (ImGui::Button("Try##alerts"))
+		if (Section("When the turn reaches you"))
 		{
-			Banner::Show(Banner::Kind::Backup, "Backup", s_LastNowMs);
-			Banner::Show(Banner::Kind::Up, "You're up", s_LastNowMs);
+			ImGui::TextColored(kGrey, "Only on WvW maps. The demo squad raises them too, so they can be tried out.");
+			StandingSignals("your turn", &s.UpBanner, &s.UpSound, &s.UpFlash, s.UpFlashColor);
+			StandingSignals("backup", &s.BackupBanner, &s.BackupSound, &s.BackupFlash, s.BackupFlashColor);
+
+			ImGui::SetNextItemWidth(160);
+			if (ImGui::SliderInt("sound volume", &s.SoundVolume, 0, 100, "%d%%")) { Settings::MarkDirty(); }
+			if (s.UpSound == static_cast<int>(Notify::Sound::File) || s.BackupSound == static_cast<int>(Notify::Sound::File))
+			{
+				char path[260] = {};
+				strncpy_s(path, s.SoundFile.c_str(), _TRUNCATE);
+				ImGui::SetNextItemWidth(400);
+				if (ImGui::InputText("WAV file", path, sizeof(path))) { s.SoundFile = path; Settings::MarkDirty(); }
+				TextInputActive = TextInputActive || ImGui::IsItemActive();
+			}
+			ImGui::SetNextItemWidth(160);
+			if (ImGui::SliderFloat("flash strength", &s.FlashStrength, 0.05f, 1.0f, "%.2f")) { Settings::MarkDirty(); }
+
+			// Straight to the signal, past the guard that stops a real turn from announcing itself twice in a row:
+			// trying colours and strengths means clicking these over and over.
+			if (ImGui::Button("Try: your turn"))
+			{
+				Notify::Preview(Notify::Standing::Up, s_LastNowMs);
+				Banner::Show(Banner::Kind::Up, "You're up", s_LastNowMs);
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Try: backup"))
+			{
+				Notify::Preview(Notify::Standing::Backup, s_LastNowMs);
+				Banner::Show(Banner::Kind::Backup, "Backup", s_LastNowMs);
+			}
+			Help("Plays the banner, the sound and the pulse along the screen edges, as they would arrive in a fight.");
 		}
-		ImGui::TextColored(kGrey, "alert text colours");
-		ImGui::SameLine(110);
-		if (ImGui::ColorEdit3("your turn##bannercolour", s.BannerUpColor, ImGuiColorEditFlags_NoInputs)) { Settings::MarkDirty(); }
-		ImGui::SameLine();
-		if (ImGui::ColorEdit3("backup##bannercolour", s.BannerBackupColor, ImGuiColorEditFlags_NoInputs)) { Settings::MarkDirty(); }
-		ImGui::SameLine();
-		if (ImGui::ColorEdit3("Illusion of Life##bannercolour", s.BannerIllusionColor, ImGuiColorEditFlags_NoInputs)) { Settings::MarkDirty(); }
 
-		ImGui::Spacing();
-		ImGui::TextUnformatted("When the turn reaches you");
-		ImGui::TextColored(kGrey, "Only on WvW maps. The demo squad raises them too, so they can be tried out.");
-		StandingSignals("your turn", &s.UpBanner, &s.UpSound, &s.UpFlash, s.UpFlashColor);
-		StandingSignals("backup", &s.BackupBanner, &s.BackupSound, &s.BackupFlash, s.BackupFlashColor);
-
-		ImGui::SetNextItemWidth(160);
-		if (ImGui::SliderInt("sound volume", &s.SoundVolume, 0, 100, "%d%%")) { Settings::MarkDirty(); }
-		if (s.UpSound == static_cast<int>(Notify::Sound::File) || s.BackupSound == static_cast<int>(Notify::Sound::File))
+		if (Section("Illusion of Life countdown"))
 		{
-			char path[260] = {};
-			strncpy_s(path, s.SoundFile.c_str(), _TRUNCATE);
-			ImGui::SetNextItemWidth(400);
-			if (ImGui::InputText("WAV file", path, sizeof(path))) { s.SoundFile = path; Settings::MarkDirty(); }
+			if (ImGui::Checkbox("count down before a revived player goes down again", &s.IllusionCountdown)) { Settings::MarkDirty(); }
+			Help("A player revived by Illusion of Life goes down again after 15 seconds unless they kill something. "
+				"You get the countdown when you are in the order with your revive ready, and always for players you "
+				"revived yourself. The first Illusion of Life of a session may not be seen.");
+			ImGui::SetNextItemWidth(90);
+			if (ImGui::InputInt("seconds before", &s.IllusionWarnSeconds))
+			{
+				s.IllusionWarnSeconds = std::clamp(s.IllusionWarnSeconds, 1, 14);
+				Settings::MarkDirty();
+			}
 			TextInputActive = TextInputActive || ImGui::IsItemActive();
-		}
-		ImGui::SetNextItemWidth(160);
-		if (ImGui::SliderFloat("flash strength", &s.FlashStrength, 0.05f, 1.0f, "%.2f")) { Settings::MarkDirty(); }
-		// Straight to the signal, past the guard that stops a real turn from announcing itself twice in a row:
-		// trying colours and strengths means clicking these over and over.
-		if (ImGui::Button("Try: your turn"))
-		{
-			Notify::Preview(Notify::Standing::Up, s_LastNowMs);
-			Banner::Show(Banner::Kind::Up, "You're up", s_LastNowMs);
-		}
-		ImGui::SameLine();
-		if (ImGui::Button("Try: backup"))
-		{
-			Notify::Preview(Notify::Standing::Backup, s_LastNowMs);
-			Banner::Show(Banner::Kind::Backup, "Backup", s_LastNowMs);
-		}
-		ImGui::SameLine();
-		ImGui::TextColored(kGrey, "(its banner, its sound, and a pulse along the screen edges)");
+			ImGui::SameLine();
+			if (ImGui::Checkbox("figures under the names", &s.IllusionNumberBelow)) { Settings::MarkDirty(); }
+			Help("Under the names puts the seconds nearer the middle of the screen, and further from the target's "
+				"name and effects at the top.");
 
-		ImGui::Spacing();
-		ImGui::TextUnformatted("Illusion of Life");
-		if (ImGui::Checkbox("count down before a revived player goes down again", &s.IllusionCountdown)) { Settings::MarkDirty(); }
-		if (ImGui::IsItemHovered())
-		{
-			ImGui::SetTooltip("%s", "A player revived by Illusion of Life goes down again after 15 seconds unless they kill "
-				"something. Everyone running the addon whose own revive skill is ready gets a countdown of the last seconds. "
-				"The first Illusion of Life of a session may not be seen.");
-		}
-		ImGui::SetNextItemWidth(90);
-		if (ImGui::InputInt("seconds before", &s.IllusionWarnSeconds))
-		{
-			s.IllusionWarnSeconds = std::clamp(s.IllusionWarnSeconds, 1, 14);
-			Settings::MarkDirty();
-		}
-		TextInputActive = TextInputActive || ImGui::IsItemActive();
-		ImGui::SameLine();
-		if (ImGui::Checkbox("figures under the names", &s.IllusionNumberBelow)) { Settings::MarkDirty(); }
-		if (ImGui::IsItemHovered())
-		{
-			ImGui::SetTooltip("%s", "Under the names puts the seconds nearer the middle of the screen, and further from the "
-				"target's name and effects at the top.");
-		}
-		ImGui::PushID("illusion");
-		ImGui::TextColored(kYellow, "%s", "when it starts");
-		ImGui::SameLine(110);
-		ImGui::SetNextItemWidth(130);
-		SoundCombo("##sound", &s.IllusionSound);
-		ImGui::SameLine();
-		if (ImGui::Button("play")) { Notify::Play(SoundOf(s.IllusionSound)); }
-		ImGui::SameLine();
-		if (ImGui::Checkbox("flash", &s.IllusionFlash)) { Settings::MarkDirty(); }
-		ImGui::SameLine();
-		ImGui::SetNextItemWidth(160);
-		if (ImGui::ColorEdit3("##colour", s.IllusionFlashColor, ImGuiColorEditFlags_NoInputs)) { Settings::MarkDirty(); }
-		ImGui::PopID();
-		// Each press is another cast, so pressing twice shows two countdowns running at once.
-		if (ImGui::Button("Try: Illusion countdown") && s_IllusionPreviews.size() < 3)
-		{
-			s_IllusionPreviews.push_back(s_LastNowMs + static_cast<unsigned>(std::clamp(s.IllusionWarnSeconds, 1, 14)) * 1000);
+			ImGui::PushID("illusion");
+			ImGui::TextColored(kYellow, "%s", "when it starts");
+			ImGui::SameLine(110);
+			ImGui::SetNextItemWidth(130);
+			SoundCombo("##sound", &s.IllusionSound);
+			ImGui::SameLine();
+			if (ImGui::Button("play")) { Notify::Play(SoundOf(s.IllusionSound)); }
+			ImGui::SameLine();
+			if (ImGui::Checkbox("flash", &s.IllusionFlash)) { Settings::MarkDirty(); }
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(160);
+			if (ImGui::ColorEdit3("##colour", s.IllusionFlashColor, ImGuiColorEditFlags_NoInputs)) { Settings::MarkDirty(); }
+			ImGui::PopID();
+			// Each press is another cast, so pressing twice shows two countdowns running at once.
+			if (ImGui::Button("Try: Illusion countdown") && s_IllusionPreviews.size() < 3)
+			{
+				s_IllusionPreviews.push_back(s_LastNowMs + static_cast<unsigned>(std::clamp(s.IllusionWarnSeconds, 1, 14)) * 1000);
+			}
 		}
 
-		ImGui::Separator();
-		ImGui::TextUnformatted("Bench swaps");
-		if (ImGui::Checkbox("Somebody moved into a benched player's subgroup takes their place", &s.Substitutes))
+		if (Section("Sharing the order in squad chat"))
 		{
-			Settings::MarkDirty();
-			Live::SetSubstitutes(s.Substitutes);
-		}
-		ImGui::TextColored(kGrey, "Set the bench subgroup in the order editor; it is shared with the order. Moving a player from");
-		ImGui::TextColored(kGrey, "the order into it takes them out, and a druid, troubadour or anyone seen reviving who moves into");
-		ImGui::TextColored(kGrey, "the subgroup they left within 2 minutes takes their place. Needs Unofficial Extras.");
+			ImGui::TextColored(kGrey, "Ctrl+Shift+K copies the order; paste it in squad chat and everyone running the addon reads it.");
+			ImGui::TextColored(kGrey, "Players ask to join with \"!rezzorder add\" (or \"add 3\"), and leave it with \"!rezzorder remove\".");
+			if (ImGui::Checkbox("Take over an order shared by the commander or a lieutenant", &s.ShareFromLeaders))
+			{
+				Settings::MarkDirty();
+				Live::SetShareRules(s.ShareFromLeaders, s.ShareFromAnyone);
+			}
+			Help("Addons cannot write in chat, so sharing is a copy and a paste. Anyone else's order waits in a "
+				"window for you to accept it.");
+			if (ImGui::Checkbox("...by anyone in the squad, without asking", &s.ShareFromAnyone))
+			{
+				Settings::MarkDirty();
+				Live::SetShareRules(s.ShareFromLeaders, s.ShareFromAnyone);
+			}
 
-		ImGui::Separator();
-		ImGui::TextUnformatted("Sharing the order in squad chat");
-		ImGui::TextColored(kGrey, "Addons cannot write in chat. \"Copy order for squad chat\" (right-click the turn window)");
-		ImGui::TextColored(kGrey, "puts a line like \"!rezzorder Kalden > Orrin*\" on the clipboard; paste it in squad chat and");
-		ImGui::TextColored(kGrey, "everyone running this addon reads it. \"?rezzorder\" asks the squad for the order.");
-		if (ImGui::Checkbox("Take over an order shared by the commander or a lieutenant", &s.ShareFromLeaders))
-		{
-			Settings::MarkDirty();
-			Live::SetShareRules(s.ShareFromLeaders, s.ShareFromAnyone);
+			// Without this, one player asking would open a window on every screen in the squad at once.
+			static const char* kAnswerNames[] = { "nobody: only a line in the turn window",
+				"me, when the order is mine", "me, always" };
+			int answer = s.AnswerRequests;
+			ImGui::SetNextItemWidth(260);
+			if (ImGui::Combo("Who answers players asking to join", &answer, kAnswerNames, IM_ARRAYSIZE(kAnswerNames)))
+			{
+				s.AnswerRequests = answer;
+				Settings::MarkDirty();
+				Live::SetAnswerRule(answer);
+			}
+			Help("An order you took over from somebody else is theirs to answer for, so by default only the client "
+				"that built the order is asked. Before anybody has an order, the commander is asked instead.");
 		}
-		if (ImGui::Checkbox("...by anyone in the squad, without asking", &s.ShareFromAnyone))
-		{
-			Settings::MarkDirty();
-			Live::SetShareRules(s.ShareFromLeaders, s.ShareFromAnyone);
-		}
-		ImGui::TextColored(kGrey, "Anyone else's order waits in a window for you to accept it.");
-		ImGui::TextColored(kGrey, "Ctrl+Shift+K copies the order without opening anything.");
 
-		// Without this, one "!rezz?" would open a window on every screen in the squad at once.
-		static const char* kAnswerNames[] = { "nobody: only a line in the turn window",
-			"me, when the order is mine", "me, always" };
-		int answer = s.AnswerRequests;
-		ImGui::SetNextItemWidth(260);
-		if (ImGui::Combo("Who answers a request for the order", &answer, kAnswerNames, IM_ARRAYSIZE(kAnswerNames)))
+		if (Section("Fight stats"))
 		{
-			s.AnswerRequests = answer;
-			Settings::MarkDirty();
-			Live::SetAnswerRule(answer);
+			static const char* kWhen[] = { "never", "after every fight", "only while Ctrl+Shift is held" };
+			int when = std::clamp(s.StatsSummary, 0, 2);
+			ImGui::SetNextItemWidth(260);
+			if (ImGui::Combo("Summary line beside the window", &when, kWhen, IM_ARRAYSIZE(kWhen)))
+			{
+				s.StatsSummary = when;
+				Settings::MarkDirty();
+			}
+			Help("What each fight came to, as one line in the messages strip. Clicking it opens the stats window.");
+			if (ImGui::Button("Open fight stats")) { ShowStats = true; }
+			ImGui::SameLine();
+			ImGui::TextColored(kGrey, "also in the turn window's right-click menu and the Nexus menu");
 		}
-		ImGui::TextColored(kGrey, "An order you took over from somebody else is theirs to answer for, so by default");
-		ImGui::TextColored(kGrey, "only the client that built the order is asked. The window closes by itself as soon");
-		ImGui::TextColored(kGrey, "as an order appears in squad chat.");
-		ImGui::TextColored(kGrey, "Hold Ctrl+Shift over the overlay to reorder it directly, even while it is locked.");
-		ImGui::TextColored(kGrey, "Squad events reach addons ~2.6 s late (ArcDPS design): states change a moment after they happen in game.");
+
+		if (Section("Bench swaps"))
+		{
+			if (ImGui::Checkbox("Somebody moved into a benched player's subgroup takes their place", &s.Substitutes))
+			{
+				Settings::MarkDirty();
+				Live::SetSubstitutes(s.Substitutes);
+			}
+			Help("Set the bench subgroup in the order editor; it is shared with the order. Moving a player from the "
+				"order into it takes them out, and a druid, troubadour or anyone seen reviving who moves into the "
+				"subgroup they left within 2 minutes takes their place. Needs Unofficial Extras.");
+		}
+
+		if (Section("Banners"))
+		{
+			ImGui::TextColored(kGrey, "Every message shows next to the turn window. These also get a banner on screen:");
+			BannerToggle("a player in the order leaves or is replaced", &s.BannerOnLeave,
+				"\"3. PlayerXYZ left the squad - you are up now\"");
+			BannerToggle("a player swaps profession", &s.BannerOnSwap,
+				"\"3. PlayerXYZ swapped to Ranger (no revive skill)\"");
+			BannerToggle("somebody shares an order", &s.BannerOnShare,
+				"\"PlayerXYZ shared a revive order (6 players) - you are now 2. (was 4.)\"");
+			BannerToggle("somebody asks to join the order", &s.BannerOnAsk,
+				"\"PlayerXYZ asked to be in the revive order\"");
+
+			// The banners are drawn by the addon rather than sent to Nexus: Nexus' own alert has no size, place or
+			// time on screen to set. The top middle of the screen is where the game shows the selected target, so
+			// both groups can be moved clear of it.
+			ImGui::Spacing();
+			static const char* kBannerStyles[static_cast<int>(Banner::Style::Count)] = {
+				"text", "plate", "window", "callout" };
+			ImGui::SetNextItemWidth(120);
+			if (ImGui::Combo("banner style", &s.BannerStyle, kBannerStyles, IM_ARRAYSIZE(kBannerStyles))) { Settings::MarkDirty(); }
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(90);
+			if (ImGui::InputFloat("seconds on screen", &s.BannerSeconds, 0.5f, 1.0f, "%.1f"))
+			{
+				s.BannerSeconds = std::clamp(s.BannerSeconds, 1.0f, 60.0f);
+				Settings::MarkDirty();
+			}
+			TextInputActive = TextInputActive || ImGui::IsItemActive();
+
+			BannerGroupOptions("messages", "Somebody left the squad, an order was shared, a problem with the addon's setup.",
+				&s.BannerInfoSize, &s.BannerInfoX, &s.BannerInfoY);
+			ImGui::SameLine();
+			if (ImGui::ColorEdit3("##messagecolour", s.BannerInfoColor, ImGuiColorEditFlags_NoInputs)) { Settings::MarkDirty(); }
+			ImGui::SameLine();
+			if (ImGui::Button("Try##messages"))
+			{
+				Banner::Show(Banner::Kind::Info, "3. PlayerXYZ left the squad, out of the order - you are up now", s_LastNowMs);
+			}
+
+			BannerGroupOptions("alerts", "Your turn, backup, and the Illusion of Life countdown.",
+				&s.BannerAlertSize, &s.BannerAlertX, &s.BannerAlertY);
+			ImGui::SameLine();
+			if (ImGui::Button("Try##alerts"))
+			{
+				Banner::Show(Banner::Kind::Backup, "Backup", s_LastNowMs);
+				Banner::Show(Banner::Kind::Up, "You're up", s_LastNowMs);
+			}
+			ImGui::TextColored(kGrey, "alert text colours");
+			ImGui::SameLine(110);
+			if (ImGui::ColorEdit3("your turn##bannercolour", s.BannerUpColor, ImGuiColorEditFlags_NoInputs)) { Settings::MarkDirty(); }
+			ImGui::SameLine();
+			if (ImGui::ColorEdit3("backup##bannercolour", s.BannerBackupColor, ImGuiColorEditFlags_NoInputs)) { Settings::MarkDirty(); }
+			ImGui::SameLine();
+			if (ImGui::ColorEdit3("Illusion of Life##bannercolour", s.BannerIllusionColor, ImGuiColorEditFlags_NoInputs)) { Settings::MarkDirty(); }
+		}
+
+		if (Section("Look and names"))
+		{
+			if (ImGui::Checkbox("Match ArcDPS appearance (colours, padding, font size)", &s.MatchArcDps)) { Settings::MarkDirty(); }
+			if (s.MatchArcDps)
+			{
+				const ArcStyle::Values& arc = ArcStyle::Get();
+				if (arc.Ok) { ImGui::TextColored(kGrey, "Read from %s", ArcStyle::SourcePath()); }
+				else { ImGui::TextColored(kGrey, "arcdps.ini not found yet: using the Nexus look."); }
+			}
+
+			static const char* kFontNames[] = { "Nexus font", "ArcDPS font", "Font file..." };
+			int font = static_cast<int>(s.Font);
+			ImGui::SetNextItemWidth(200);
+			if (ImGui::Combo("Overlay font", &font, kFontNames, IM_ARRAYSIZE(kFontNames)))
+			{
+				s.Font = static_cast<Settings::FontSource>(font);
+				Settings::MarkDirty();
+			}
+			if (s.Font == Settings::FontSource::File)
+			{
+				char path[260] = {};
+				strncpy_s(path, s.FontFile.c_str(), _TRUNCATE);
+				ImGui::SetNextItemWidth(400);
+				if (ImGui::InputText("TTF file", path, sizeof(path))) { s.FontFile = path; Settings::MarkDirty(); }
+			}
+			else if (s.Font == Settings::FontSource::ArcDps)
+			{
+				ImGui::TextColored(kGrey, "Uses arcdps_font.ttf from the game folder, or the font ArcDPS shows by default.");
+			}
+			if (ImGui::Checkbox("Always use account names", &s.PreferAccount)) { Settings::MarkDirty(); }
+			Help("Otherwise character names are used, except in Edge of the Mists, where players from other worlds "
+				"show a WvW rank instead of a name.");
+		}
+
+		if (Section("Good to know"))
+		{
+			ImGui::TextColored(kGrey, "Squad events reach addons ~2.6 s late. That is ArcDPS by design, so a state changes a");
+			ImGui::TextColored(kGrey, "moment after it happens in game. Cooldowns still count from when the cast really happened.");
+			ImGui::TextColored(kGrey, "Hold Ctrl+Shift over the turn window to drag players into another place, even while locked.");
+			ImGui::TextColored(kGrey, "The order, its bench and everything here live in settings.txt in the addon's folder.");
+		}
 	}
 }

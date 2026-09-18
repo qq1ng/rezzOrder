@@ -9,6 +9,15 @@ bool CountsAsUsed(const ReviveSkill& aSkill, uint8_t aStopReason, int32_t aBaseM
 	return aStopReason == ArcDps::ANIMSTOP_RETURN_CONTROL || aBaseMs >= aSkill.CastMs;
 }
 
+uint8_t GroupTargets(ReviveGroup aGroup)
+{
+	for (const ReviveSkill& skill : kReviveSkills)
+	{
+		if (skill.Group == aGroup && skill.IsPlayerCast) { return skill.WvwTargets; }
+	}
+	return 0;
+}
+
 const ReviveSkill* FindReviveSkill(uint32_t aSkillId)
 {
 	for (const ReviveSkill& skill : kReviveSkills)

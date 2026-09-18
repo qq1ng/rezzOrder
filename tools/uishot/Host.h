@@ -10,6 +10,8 @@ namespace Host
 	void SetDevice(ID3D11Device* aDevice);
 	// The session the UI reads through Live::GetView() this frame.
 	void SetView(const Rezz::SessionView& aView);
+	// The fights the stats window shows.
+	void SetFights(std::vector<Rezz::FightStat> aFights);
 	// Fonts have to exist before the first frame; aTtfFile may be empty for ImGui's built-in font.
 	void BuildFonts(const char* aTtfFile, float aBaseSize);
 	void ReleaseIcons();

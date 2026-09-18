@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "Arc.h"
+#include "FightStats.h"
 #include "Tracker.h"
 
 // Live revive order session: turns arcdps squad events and the Unofficial Extras roster into tracker calls,
@@ -40,10 +41,18 @@ namespace Rezz
 
 	// OrderCleared: we left the squad, so the order (which belongs to that squad) was removed.
 	// ShareApplied: someone's shared order was taken over. ShareOffered: it is waiting for us to accept it.
-	// ShareRequested: somebody asked the squad for the order. Substituted: somebody moved into the subgroup of a
-	// player in the order who was benched, and took their place.
+	// ShareRequested: somebody asked to be put in the order. Substituted: somebody moved into the subgroup of a
+	// player in the order who was benched, and took their place. FightSummary: a fight ended and its stats are in.
 	enum class NoticeKind : uint8_t { LeftSquad, LeftMap, Returned, ChangedProfession, OrderCleared,
-		ShareApplied, ShareOffered, ShareRequested, Substituted };
+		ShareApplied, ShareOffered, ShareRequested, Substituted, FightSummary };
+
+	// Somebody asking to be put in the order ("!rezzorder add 3").
+	struct JoinRequest
+	{
+		std::string Account;   // theirs, with the leading ':'
+		int         Place = 0; // the place they asked for, 1-based; 0: no preference, so the end
+		uint64_t    TimeMs = 0;
+	};
 
 	// A revive order somebody sent in squad chat.
 	struct SharedOrder
@@ -87,8 +96,8 @@ namespace Rezz
 		std::string               SelfAccount;
 		bool                      HasShare = false;   // a shared order is waiting to be accepted
 		SharedOrder               Share;
-		bool                      HasRequest = false; // somebody asked us for the order
-		std::string               RequestFrom;        // their account, with the leading ':'
+		// Players who asked to be put in the order, oldest first, and only on the client that answers them.
+		std::vector<JoinRequest>  Requests;
 		std::vector<IllusionTarget> Illusions;        // other players under Illusion of Life, soonest to run out first
 		bool                      SelfCanRevive = false; // our own revive skill is ready and we are on our feet to use it
 	};
@@ -115,8 +124,10 @@ namespace Rezz
 		static constexpr uint64_t kResyncAfterMs = 90 * 1000;
 		// No event from a player during a squad fight for this long: they are out of arcdps' range.
 		static constexpr uint64_t kOutOfRangeMs = 15 * 1000;
-		// A request for the order that nobody answered stops asking after this long.
+		// A request nobody answered stops asking after this long: by then the squad has moved on.
 		static constexpr uint64_t kRequestShowMs = 60 * 1000;
+		// At most this many waiting at once, so a squad forming up cannot fill the screen.
+		static constexpr size_t kMaxRequests = 6;
 		// How soon the same person asking again is announced again, rather than only refreshing the window.
 		static constexpr uint64_t kAskAgainMs = 30 * 1000;
 		// How long the squad has to be out of combat before the turn goes back to the top of the order. ArcDPS
@@ -153,10 +164,11 @@ namespace Rezz
 		// Takes over the order that is waiting, or throws it away.
 		void AcceptShare();
 		void DismissShare();
-		// The request for the order has been answered (or ignored).
-		void ClearRequest();
-		// Who gets asked to answer "!rezz?". Only the client whose order it is, by default: in a squad where
-		// everyone took the order from the commander, that is exactly one person.
+		// One request has been answered (or ignored); empty clears them all.
+		void ClearRequest(const std::string& aAccount = {});
+		// Who gets asked to answer "!rezzorder add". Only the client whose order it is, by default: in a squad
+		// where everyone took the order from the commander, that is exactly one person. Before there is an
+		// order to own, the commander is asked, or the lieutenants when no commander is running the addon.
 		enum class AnswerRule : uint8_t { Never = 0, WhenOrderIsOurs = 1, Always = 2 };
 		void SetAnswerRule(AnswerRule aRule);
 		// Bench swaps (decided with the squad, 2026-09-17). Needs Unofficial Extras, the only source of subgroup
@@ -186,6 +198,8 @@ namespace Rezz
 		std::vector<Notice> TakeNotices();
 
 		const Tracker& GetTracker() const { return m_Tracker; }
+		// What each fight of this session came to, oldest first. Kept in memory only.
+		const std::vector<FightStat>& Fights() const { return m_Fights; }
 
 	private:
 		struct AgentRef
@@ -218,6 +232,14 @@ namespace Rezz
 		// " - you are up now" when somebody dropping out of the rotation moved the turn to us.
 		std::string StandingChange(int aBefore, int aAfter) const;
 		void OnSelfLeftSquad();
+		// Who could act on a down happening now, for the fight stats.
+		FightStats::Chance ChanceNow(uint64_t aTimeMs) const;
+		// Moves ups that have had their chance to be matched with a revive into the fight stats.
+		void SettleUps(uint64_t aNowMs);
+		// Drains the tracker's revive credits into the fight stats.
+		void TakeAttributions();
+		// Whether this client is the one that answers players asking to be put in the order.
+		bool AnswersRequests() const;
 		bool SelfCanRevive(uint64_t aNowMs) const;
 		// A completed Illusion of Life cast (aIsCast) or an ally getting up, matched against the other kind at the
 		// same instant: stands in for the effect's apply until one has been seen.
@@ -270,12 +292,10 @@ namespace Rezz
 		std::deque<RecentEvent>                       m_RecentGotUp;         // who got up, when
 		SharedOrder                                   m_Share;
 		bool                                          m_HasShare        = false;
-		std::string                                   m_RequestFrom;
-		uint64_t                                      m_RequestAtMs     = 0;
-		// Who we last told the player about, so one person typing "?rezzorder" over and over cannot fill the
-		// window with notices. Their question still refreshes, it just stops being announced again.
-		std::string                                   m_AskedNoticeFrom;
-		uint64_t                                      m_AskedNoticeMs   = 0;
+		std::deque<JoinRequest>                       m_Requests;
+		// When each player was last announced, so one person typing it over and over cannot fill the window
+		// with notices. Their request still refreshes, it just stops being announced again.
+		std::unordered_map<std::string, uint64_t>     m_AskedNoticeMs;
 		// A place in the order left open: its player went to the bench, left the squad or swapped character.
 		struct Vacancy
 		{
@@ -297,6 +317,21 @@ namespace Rezz
 		};
 		std::deque<Vacancy>                           m_Vacancies;
 		std::deque<Arrival>                           m_Arrivals;
+		// An ally getting up is only known to be a revive once the cast it belongs to has been matched, which can
+		// be a moment later, so ups wait here to be counted as revived or rallied.
+		struct PendingUp
+		{
+			std::string Account;
+			uint64_t    TimeMs;    // event time
+			uint64_t    ArrivedMs; // when we heard about it
+		};
+		static constexpr uint64_t kUpSettleMs = 1500;
+		static constexpr size_t   kKeepFights = 30;
+		FightStats                                    m_Stats;
+		std::vector<FightStat>                        m_Fights;
+		std::vector<PendingUp>                        m_PendingUps;
+		std::vector<Attribution>                      m_Attributions; // matched revives waiting for their up
+		int                                           m_FightNumber = 0;
 		// Last subgroup Unofficial Extras reported. Kept apart from RosterMember::Subgroup, which arcdps also
 		// writes, and never 0: Extras reports 0 for a moment while a player loads into a map.
 		std::unordered_map<std::string, uint16_t>     m_Subgroups;

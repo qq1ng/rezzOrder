@@ -29,8 +29,11 @@ namespace Live
 	void SetSubstitutes(bool aEnabled);
 	void AcceptShare();
 	void DismissShare();
-	void ClearRequest();
+	// One player's request has been answered; empty clears them all.
+	void ClearRequest(const std::string& aAccount = {});
 
 	Rezz::SessionView GetView();
+	// This session's fights, oldest first. Copied, so the window can read it without holding the lock.
+	std::vector<Rezz::FightStat> GetFights();
 	std::vector<Rezz::Notice> TakeNotices();
 }

@@ -5,6 +5,7 @@
 #include "Arc.h"
 #include "Banner.h"
 #include "Demo.h"
+#include "Host.h"
 #include "OrderUi.h"
 #include "ReviveSkills.h"
 
@@ -140,21 +141,24 @@ namespace Shots
 		}
 
 		// Somebody typed "?rezzorder" in squad chat and we are the one with an order.
+		// Somebody asked to be put in the order, and named the place they would like.
 		Rezz::SessionView OrderAsked()
 		{
-			Squad squad = Base();
+			Squad squad = Base(9);
+			squad.Order({ Account(0), Account(1), Account(2), Account(3), Account(4), Account(5) });
 			squad.Used(Account(2), 27000);
-			squad.Session().OnChatMessage(Account(4), "?rezzorder", kNowMs);
+			squad.Session().OnChatMessage(Account(7), "!rezzorder add 3", kNowMs);
 			return squad.View();
 		}
 
-		// The usual case: whoever asks has just joined and is not in the order yet.
+		// A squad forming up: several at once, each with their own place to pick.
 		Rezz::SessionView OrderAskedByOutsider()
 		{
-			Squad squad = Base();
-			squad.Order({ Account(0), Account(1), Account(2), Account(3), Account(4) });
+			Squad squad = Base(9);
+			squad.Order({ Account(0), Account(1), Account(2), Account(3) });
 			squad.Used(Account(2), 27000);
-			squad.Session().OnChatMessage(Account(5), "?rezzorder", kNowMs);
+			squad.Session().OnChatMessage(Account(7), "!rezzorder add 2", kNowMs);
+			squad.Session().OnChatMessage(Account(8), "!rezzorder add", kNowMs);
 			return squad.View();
 		}
 
@@ -258,7 +262,8 @@ namespace Shots
 			// and pushed it into the windows beside it).
 			auto withNotice = [] {
 				Rezz::SessionView view = Mixed();
-				OrderUi::AddNotice("3. Maryth Solane left the squad, out of the order", static_cast<unsigned>(kNowMs));
+				OrderUi::AddNotice("3. Maryth Solane left the squad, out of the order", static_cast<unsigned>(kNowMs),
+					"Maryth Solane");
 				return view;
 			};
 			list.push_back({ "messages-below", "a squad member left: the message sits under the window",
@@ -277,6 +282,8 @@ namespace Shots
 			auto bannerStack = [] {
 				Banner::Show(Banner::Kind::Problem, "Rezz Order problem: no combat data from ArcDPS yet. Is ArcDPS enabled?",
 					static_cast<unsigned>(kNowMs));
+				Banner::Show(Banner::Kind::Info, "3. Maryth left the squad, out of the order - you are up now",
+					static_cast<unsigned>(kNowMs), "Maryth");
 				Banner::Show(Banner::Kind::Info, "Kalden shared a revive order (6 players) - you are now 2. (was 4.)",
 					static_cast<unsigned>(kNowMs));
 				Banner::Show(Banner::Kind::Backup, "Backup", static_cast<unsigned>(kNowMs));
@@ -404,14 +411,55 @@ namespace Shots
 					squad.Used(Account(1), 8000); // the turn sits on Maryth and we are next
 					return squad.View();
 				}, Scenario::Window::Screen });
-			list.push_back({ "share-request", "someone asked the squad for the order",
+			list.push_back({ "share-request", "somebody asked to be put in the order, at a place they named",
 				[](Settings::Values& s) { Layout(s, L::Compact); }, OrderAsked, Scenario::Window::Request });
-			list.push_back({ "share-request-newcomer", "the player asking is not in the order yet",
+			list.push_back({ "share-request-newcomer", "two players asking at once while the order is being built",
 				[](Settings::Values& s) { Layout(s, L::Compact); }, OrderAskedByOutsider, Scenario::Window::Request });
 			list.push_back({ "share-offer", "a squad member shared an order: accept or ignore",
 				[](Settings::Values& s) { Layout(s, L::Compact); }, SharedOffer, Scenario::Window::Share });
 			list.push_back({ "editor", "the order editor", [](Settings::Values&) {}, NinePlayers,
 				Scenario::Window::Editor });
+			// Fight stats: one fight with every kind of outcome in it, so the columns all have something to show.
+			list.push_back({ "fight-stats", "what the squad's revive tools did in the last fight",
+				[](Settings::Values&) {}, [] {
+					Rezz::FightStat fight;
+					fight.Number = 3;
+					fight.StartMs = 0;
+					fight.EndMs = 94000;
+					fight.Downs = 9;
+					fight.Revived = 5;
+					fight.Rallied = 2;
+					fight.Died = 2;
+					fight.Possible = 7;
+					auto player = [](const std::string& aAccount, int aRevived, int aUsed, int aOverlapped, int aMissed,
+						int aLetDie, int aByHand, int aInterrupted, int aOutOfTurn, uint64_t aLate)
+					{
+						Rezz::PlayerStat stat;
+						stat.Account = aAccount;
+						stat.Revived = aRevived;
+						stat.Used = aUsed;
+						stat.Overlapped = aOverlapped;
+						stat.OnNothing = aOverlapped > 0 ? 0 : 1;
+						stat.TooLate = aOverlapped;
+						stat.MissedTurns = aMissed;
+						stat.LetDie = aLetDie;
+						stat.ByHand = aByHand;
+						stat.Interrupted = aInterrupted;
+						stat.OutOfTurn = aOutOfTurn;
+						stat.TotalLateMs = aLate;
+						stat.LateCasts = aLate > 0 ? 1 : 0;
+						stat.SlowestMs = aLate;
+						return stat;
+					};
+					fight.Players = {
+						player(Account(0), 3, 1, 0, 0, 0, 0, 0, 0, 1900),
+						player(Account(4), 2, 2, 1, 0, 0, 1, 0, 1, 4200),
+						player(Account(1), 0, 1, 1, 1, 1, 0, 2, 0, 7300),
+					};
+					Host::SetFights({ fight });
+					Squad squad = Base(6);
+					return squad.View();
+				}, Scenario::Window::Stats });
 			// The star button lights up for the players carrying the mark, so the column reads at a glance.
 			list.push_back({ "editor-precast", "the order editor with two precast players marked",
 				[](Settings::Values&) {}, [] {

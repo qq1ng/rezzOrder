@@ -322,8 +322,10 @@ int main(int argc, char** argv)
 		Settings::Current.Order = view.Order;
 		Host::SetView(view);
 		bool editor = scenario.Shows == Shots::Scenario::Window::Editor;
+		bool stats = scenario.Shows == Shots::Scenario::Window::Stats;
 		OrderUi::ShowEditor = editor;
-		Settings::Current.OverlayVisible = !editor;
+		OrderUi::ShowStats = stats;
+		Settings::Current.OverlayVisible = !editor && !stats;
 
 		// The window settles its size on the first frame; the third is what gets saved.
 		// The turn window takes its saved position only when it first appears, which it did in an earlier
@@ -354,7 +356,8 @@ int main(int argc, char** argv)
 			: scenario.Shows == Shots::Scenario::Window::Screen ? wholeScreen
 			: scenario.Shows == Shots::Scenario::Window::Editor ? OrderUi::LastEditorFrame
 			: scenario.Shows == Shots::Scenario::Window::Share ? OrderUi::LastShareFrame
-			: scenario.Shows == Shots::Scenario::Window::Request ? OrderUi::LastRequestFrame : OrderUi::LastFrame;
+			: scenario.Shows == Shots::Scenario::Window::Request ? OrderUi::LastRequestFrame
+			: scenario.Shows == Shots::Scenario::Window::Stats ? OrderUi::LastStatsFrame : OrderUi::LastFrame;
 		if (!info.Drawn)
 		{
 			std::printf("FAILED %s: the window drew nothing\n", scenario.Name.c_str());

@@ -178,7 +178,7 @@ namespace Rezz
 		if (!revived) { return; }
 
 		Prune(aTimeMs);
-		RecentUp& up = m_RecentUps.emplace_back(RecentUp{ aTimeMs });
+		RecentUp& up = m_RecentUps.emplace_back(RecentUp{ aTimeMs, aAccount });
 
 		// Best matching revive that has already been reported (slam stops arrive after the ally is up; those
 		// are matched from AddRevive instead).
@@ -196,7 +196,7 @@ namespace Rezz
 		}
 		if (best)
 		{
-			Attribute(*best);
+			Attribute(*best, aAccount);
 			up.Attributed = true;
 		}
 	}
@@ -258,17 +258,22 @@ namespace Rezz
 			if (up.Attributed || revive.Attributed >= aSkill.WvwTargets) { continue; }
 			int64_t dt = static_cast<int64_t>(up.TimeMs) - static_cast<int64_t>(aTimeMs);
 			if (dt < window.From || dt > window.To) { continue; }
-			Attribute(revive);
+			Attribute(revive, up.Account);
 			up.Attributed = true;
 		}
 	}
 
-	void Tracker::Attribute(RecentRevive& aRevive)
+	void Tracker::Attribute(RecentRevive& aRevive, const std::string& aRevived)
 	{
 		aRevive.Attributed++;
 		SkillStatus& skill = GetSkill(GetPlayer(aRevive.Account), aRevive.Group);
 		skill.Revived++;
 		skill.LastRevived++;
+		constexpr size_t kKeepAttributions = 64; // drained every tick; this only bounds a session without a UI
+		if (m_Attributions.size() < kKeepAttributions)
+		{
+			m_Attributions.push_back(Attribution{ aRevive.TimeMs, aRevive.Account, aRevived });
+		}
 	}
 
 	void Tracker::Prune(uint64_t aTimeMs)

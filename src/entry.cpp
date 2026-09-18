@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include <Windows.h>
+#include <shellapi.h>
 
 #include "imgui/imgui.h"
 #include "mumble/Mumble.h"
@@ -29,7 +30,7 @@
 #include <mmsystem.h>
 
 #define ADDON_NAME "Rezz Order"
-#define ADDON_VERSION_STRING "0.4.1"
+#define ADDON_VERSION_STRING "0.4.2"
 
 namespace
 {
@@ -298,9 +299,21 @@ namespace
 			Timing::Step step("roster notices");
 			for (const Rezz::Notice& notice : Live::TakeNotices())
 			{
-				OrderUi::AddNotice(notice.Text, now);
+				// The player a message is about is drawn dimmer than the rest of it, so the name is the part
+				// that catches the eye.
+				if (notice.Kind == Rezz::NoticeKind::FightSummary)
+				{
+					// 0 off, 1 always, 2 only while Ctrl+Shift is held: a line after every fight is a lot for
+					// somebody who only wants the turn window.
+					int when = Settings::Current.StatsSummary;
+					bool held = (::GetKeyState(VK_CONTROL) & 0x8000) != 0 && (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
+					if (when == 1 || (when == 2 && held)) { OrderUi::AddNotice(notice.Text, now, {}, true); }
+					continue;
+				}
+				std::string name = Rezz::DisplayAccount(notice.Account);
+				OrderUi::AddNotice(notice.Text, now, name);
 				if (notice.Kind == Rezz::NoticeKind::OrderCleared) { OrderUi::OnOrderCleared(); }
-				if (WantsBanner(notice.Kind)) { Banner::Show(Banner::Kind::Info, notice.Text, now); }
+				if (WantsBanner(notice.Kind)) { Banner::Show(Banner::Kind::Info, notice.Text, now, name); }
 			}
 		}
 
@@ -318,10 +331,78 @@ namespace
 	// still better than letting the exception reach Nexus, which would take the game down with it.
 	void OnRender() { Guarded("the render callback", [] { RenderFrame(); }); }
 
+	// What the addon needs, with a line per dependency and the way to get it. This is the first thing a new
+	// player sees on the options page, because nothing else here works until it is all green.
+	void SetupStatus()
+	{
+		static const ImVec4 kGood{ 0.45f, 0.85f, 0.45f, 1.0f };
+		static const ImVec4 kBad{ 0.95f, 0.45f, 0.40f, 1.0f };
+		static const ImVec4 kGrey{ 0.62f, 0.62f, 0.62f, 1.0f };
+
+		if (!Ui::Deps.Checked)
+		{
+			ImGui::TextColored(kGrey, "Checking what is installed...");
+			return;
+		}
+
+		bool ready = Ui::Deps.ArcDps && Ui::Deps.Integration && Ui::Deps.UnofficialExtras;
+		if (!ImGui::CollapsingHeader(ready ? "Setup: everything found###rezzorder_setup"
+			: "Setup: something is missing###rezzorder_setup", ready ? 0 : ImGuiTreeNodeFlags_DefaultOpen))
+		{
+			return;
+		}
+
+		struct Line
+		{
+			bool        Have;
+			const char* Name;
+			const char* What;
+			const char* Where;
+			const char* Url;
+		};
+		const Line lines[] = {
+			{ Ui::Deps.ArcDps, "ArcDPS", "every cast, down and rally this addon reacts to",
+				"Nexus menu > Addons > search for ArcDPS", "https://www.deltaconnected.com/arcdps/" },
+			{ Ui::Deps.Integration, "ArcDPS Integration", "passes those events on to Nexus addons",
+				"set up by Nexus itself once ArcDPS loads through it; restart the game", "https://raidcore.gg/Nexus" },
+			{ Ui::Deps.UnofficialExtras, "Unofficial Extras", "squad roles, subgroups, bench swaps and order sharing",
+				"put Unofficial_Extras.dll in the addons folder, then restart",
+				"https://github.com/Krappa322/arcdps_unofficial_extras_releases/releases" },
+		};
+
+		for (const Line& line : lines)
+		{
+			ImGui::TextColored(line.Have ? kGood : kBad, line.Have ? "[ok]" : "[missing]");
+			ImGui::SameLine();
+			ImGui::TextUnformatted(line.Name);
+			ImGui::SameLine();
+			ImGui::TextColored(kGrey, "- %s", line.What);
+			if (line.Have) { continue; }
+			ImGui::TextColored(kGrey, "      %s", line.Where);
+			ImGui::SameLine();
+			ImGui::PushID(line.Name);
+			if (ImGui::SmallButton("open page")) { ShellExecuteA(nullptr, "open", line.Url, nullptr, nullptr, SW_SHOWNORMAL); }
+			ImGui::PopID();
+		}
+
+		if (ImGui::SmallButton("Copy the addons folder path"))
+		{
+			std::filesystem::path addons = std::filesystem::path(s_Api->Paths_GetAddonDirectory("")).lexically_normal();
+			ImGui::SetClipboardText(addons.string().c_str());
+		}
+		ImGui::SameLine();
+		ImGui::TextColored(kGrey, "then paste it into Explorer to drop a .dll in");
+		if (!ready)
+		{
+			ImGui::TextColored(kGrey, "Everything is checked again each time the game starts.");
+		}
+	}
+
 	void OnOptions()
 	{
 		Guarded("the options page", []
 		{
+		SetupStatus();
 		OrderUi::Options();
 		ImGui::Separator();
 		if (ImGui::CollapsingHeader("Field recorder (testing)"))
@@ -349,6 +430,7 @@ namespace
 		Guarded("the quick access menu", []
 		{
 			if (ImGui::Button("Rezz Order editor")) { OrderUi::ShowEditor = true; }
+			if (ImGui::Button("Fight stats")) { OrderUi::ShowStats = true; }
 			if (ImGui::Button("Copy order for squad chat")) { OrderUi::CopyOrderRequested = true; }
 		});
 	}

@@ -52,6 +52,14 @@ namespace Rezz
 
 	enum class Eligibility : uint8_t { Ready, Casting, Cooldown, Downed, Dead, Away };
 
+	// An ally getting up, credited to the revive that picked them up. The session turns these into fight stats.
+	struct Attribution
+	{
+		uint64_t    TimeMs;
+		std::string Reviver;
+		std::string Revived;
+	};
+
 	struct OrderRow
 	{
 		std::string         Account;
@@ -124,6 +132,9 @@ namespace Rezz
 		// Account of the last player in the order who spent a revive skill, or empty.
 		const std::string& LastOrderedUser() const { return m_LastOrderedUser; }
 
+		// Allies credited to a revive since the last call.
+		std::vector<Attribution> TakeAttributions() { return std::move(m_Attributions); }
+
 	private:
 		// A spent cast or effect waiting to be matched with allies getting up around it.
 		struct RecentRevive
@@ -138,14 +149,15 @@ namespace Rezz
 		// An ally who got up from downed, waiting to be matched with a revive cast or effect.
 		struct RecentUp
 		{
-			uint64_t TimeMs;
-			bool     Attributed = false;
+			uint64_t    TimeMs;
+			std::string Account;
+			bool        Attributed = false;
 		};
 
 		PlayerStatus& GetPlayer(const std::string& aAccount);
 		SkillStatus& GetSkill(PlayerStatus& aPlayer, ReviveGroup aGroup);
 		void AddRevive(uint64_t aTimeMs, const std::string& aAccount, const ReviveSkill& aSkill);
-		void Attribute(RecentRevive& aRevive);
+		void Attribute(RecentRevive& aRevive, const std::string& aRevived);
 		void Prune(uint64_t aTimeMs);
 
 		std::vector<std::string>                      m_Order;
@@ -153,5 +165,6 @@ namespace Rezz
 		std::string                                   m_LastOrderedUser;
 		std::deque<RecentRevive>                      m_RecentRevives;
 		std::deque<RecentUp>                          m_RecentUps;
+		std::vector<Attribution>                      m_Attributions;
 	};
 }

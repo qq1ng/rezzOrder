@@ -29,7 +29,7 @@ namespace Shots
 		// Which window the shot is of. Overlay by default.
 		// Screen: the whole canvas, for things drawn outside any window (the edge flash).
 		// Banners: the messages drawn across the top of the screen, cropped to where they landed.
-		enum class Window : uint8_t { Overlay, Editor, Share, Request, Screen, Banners };
+		enum class Window : uint8_t { Overlay, Editor, Share, Request, Screen, Banners, Stats };
 		Window      Shows = Window::Overlay;
 		// A menu to open for the shot: -1 none, -2 the window menu, 0 and up a row's menu.
 		int         Menu = -1;

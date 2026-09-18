@@ -63,6 +63,7 @@ namespace Settings
 
 			if (key == "order") { if (!value.empty()) { values.Order.push_back(value); } }
 			else if (key == "precast") { if (!value.empty()) { values.Precast.push_back(value); } }
+			else if (key == "stats_summary") { values.StatsSummary = std::clamp(std::atoi(value.c_str()), 0, 2); }
 			else if (key == "bench_subgroup")
 			{
 				int bench = std::atoi(value.c_str());
@@ -183,6 +184,7 @@ namespace Settings
 			for (const std::string& account : v.Order) { out << "order=" << account << "\n"; }
 			for (const std::string& account : v.Precast) { out << "precast=" << account << "\n"; }
 			out << "bench_subgroup=" << v.Bench << "\n";
+			out << "stats_summary=" << v.StatsSummary << "\n";
 			for (const auto& [account, nickname] : v.Nicknames) { out << "nick=" << account << "=" << nickname << "\n"; }
 			for (const auto& [name, accounts] : v.Presets)
 			{

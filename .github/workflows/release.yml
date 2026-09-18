@@ -23,6 +23,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0    # the tag's own message is used as the release text
 
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@v1
@@ -44,16 +45,68 @@ jobs:
           path: build/RezzOrder.dll
           if-no-files-found: error
 
+      # What this release says, in one place: the GitHub release page and the Discord post both use it.
+      # Write docs/releases/<tag>.md for a release with something to say; otherwise an annotated tag's own
+      # message is used ("git tag -a v1.2.3 -m 'what changed'"), and failing that a plain line.
+      - name: Work out what to say about this release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $notes = "docs/releases/$tag.md"
+          if (Test-Path $notes) { $what = (Get-Content $notes -Raw).Trim() }
+          else { $what = (git tag -l --format='%(contents:subject)%0a%0a%(contents:body)' $tag | Out-String).Trim() }
+          if (-not $what) { $what = "Fixes and improvements. The commits below say what changed." }
+          # Discord gets what this release says; the release page gets that plus how to install it.
+          Set-Content -Path release_discord.md -Value $what -Encoding utf8
+          $install = @"
+
+---
+
+Put ``RezzOrder.dll`` into ``<Guild Wars 2>ddons\``, then start the game.
+
+Needs [Nexus](https://raidcore.gg/Nexus), [ArcDPS](https://www.deltaconnected.com/arcdps/) (the Nexus addon
+library installs ArcDPS Integration with it) and
+[Unofficial Extras](https://github.com/Krappa322/arcdps_unofficial_extras_releases), which is required for
+order sharing, bench swaps and squad roles.
+
+Questions and bug reports: [Discord](https://discord.gg/fufbGGGuXv)
+"@
+          Set-Content -Path release_body.md -Value ($what + $install) -Encoding utf8
+          "$what" | Write-Host
+
       - name: Attach it to the release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: build/RezzOrder.dll
           generate_release_notes: true
-          body: |
-            Put `RezzOrder.dll` into `<Guild Wars 2>\addons\`, then start the game.
+          body_path: release_body.md
 
-            Needs [Nexus](https://raidcore.gg/Nexus), [ArcDPS](https://www.deltaconnected.com/arcdps/) and
-            the **ArcDPS Integration** addon from the Nexus addon library.
-            [Unofficial Extras](https://github.com/Krappa322/arcdps_unofficial_extras_releases) is optional
-            and adds squad roles and order sharing.
+      # GitHub's own Discord integration can only post "New release published: vX". This posts the release
+      # text instead. Set the repository secret DISCORD_RELEASE_WEBHOOK to a Discord webhook URL (the plain
+      # one, without "/github" on the end); without it this step does nothing.
+      - name: Announce it in Discord
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+        run: |
+          if (-not $env:DISCORD_WEBHOOK) { Write-Host "no webhook set, skipping"; exit 0 }
+          $tag = "${{ github.ref_name }}"
+          $what = (Get-Content release_discord.md -Raw).Trim()
+          if ($what.Length -gt 3500) { $what = $what.Substring(0, 3500) + "..." }
+          $url = "https://github.com/${{ github.repository }}/releases/tag/$tag"
+          $payload = @{
+            username = "Rezz Order"
+            embeds = @(@{
+              title = "Rezz Order $tag"
+              url = $url
+              description = $what
+              color = 3447003
+              footer = @{ text = "Put RezzOrder.dll into <Guild Wars 2>\addons\ and restart the game" }
+            })
+          } | ConvertTo-Json -Depth 5
+          Invoke-RestMethod -Uri $env:DISCORD_WEBHOOK -Method Post -ContentType 'application/json; charset=utf-8' `
+            -Body ([System.Text.Encoding]::UTF8.GetBytes($payload))
+          Write-Host "posted $tag to Discord"
