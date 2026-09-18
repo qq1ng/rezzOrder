@@ -59,20 +59,21 @@ jobs:
           if (-not $what) { $what = "Fixes and improvements. The commits below say what changed." }
           # Discord gets what this release says; the release page gets that plus how to install it.
           Set-Content -Path release_discord.md -Value $what -Encoding utf8
-          $install = @"
-
----
-
-Put ``RezzOrder.dll`` into ``<Guild Wars 2>ddons\``, then start the game.
-
-Needs [Nexus](https://raidcore.gg/Nexus), [ArcDPS](https://www.deltaconnected.com/arcdps/) (the Nexus addon
-library installs ArcDPS Integration with it) and
-[Unofficial Extras](https://github.com/Krappa322/arcdps_unofficial_extras_releases), which is required for
-order sharing, bench swaps and squad roles.
-
-Questions and bug reports: [Discord](https://discord.gg/fufbGGGuXv)
-"@
-          Set-Content -Path release_body.md -Value ($what + $install) -Encoding utf8
+          # Single-quoted lines, so PowerShell leaves backslashes and backticks alone.
+          $install = @(
+            ''
+            '---'
+            ''
+            'Put `RezzOrder.dll` into `<Guild Wars 2>\addons\`, then start the game.'
+            ''
+            'Needs [Nexus](https://raidcore.gg/Nexus), [ArcDPS](https://www.deltaconnected.com/arcdps/) (the Nexus'
+            'addon library installs ArcDPS Integration with it) and'
+            '[Unofficial Extras](https://github.com/Krappa322/arcdps_unofficial_extras_releases), which is required'
+            'for order sharing, bench swaps and squad roles.'
+            ''
+            'Questions and bug reports: [Discord](https://discord.gg/fufbGGGuXv)'
+          ) -join "`n"
+          Set-Content -Path release_body.md -Value ($what + "`n" + $install) -Encoding utf8
           "$what" | Write-Host
 
       - name: Attach it to the release
