@@ -1,30 +1,19 @@
 # Rezz Order
 
-> ## Discontinued — please stop using it
+> ## Discontinued
 >
 > **This addon is no longer developed, and I no longer recommend running it.**
 >
 > Rezz Order worked out whose revive skill was ready by adding up cast events from ArcDPS. In its
-> 20.09.2026 build, ArcDPS stopped giving addons that data, and its author gave the reason:
+> 20.09.2026 build, ArcDPS stopped giving addons that data
 >
-> > "it's been brought to my attention that there are addon/s that use my realtime data to track cooldowns,
-> > which goes against the spirit of whats been allowed as a dps meter as per the reddit post way back when.
-> > the build today intentionally removes animation data from realtime for this reason - cooldowns are a
-> > status"
->
-> He is right, and this addon is one of the ones he means. In [that thread](https://www.reddit.com/r/Guildwars2/comments/66m13h/comment/dgjwapj/),
-> ArenaNet set out what a third-party combat tool may do: it may collect and show what *happened* in combat,
-> but not a player's *current status*, and "cooldowns would fall under monitoring current entity status".
-> Showing whose revive skill is ready is exactly that, and so is the Illusion of Life countdown. I built
-> those without thinking it through, and they should not have existed.
->
-> Since the 20.09.2026 ArcDPS build, the turn tracking no longer works at all, and I am not going to
+>> Since the 20.09.2026 ArcDPS build, the turn tracking no longer works at all, and I am not going to
 > rebuild it another way. The older releases below stay downloadable so nothing breaks unannounced, but
 > I would turn the addon off.
 >
-> The code stays here, read-only, for anyone who wants to read it.
->
-> — qq1ng, 22.09.2026
+> The code stays, for anyone who wants to read it.
+>22.09.2026
+
 
 A Guild Wars 2 addon for WvW squads with a set revive tool order. It watches everyone's instant revive
 skills and shows whose turn it is, so two people don't burn an Illu and Spirit on the
