@@ -19,7 +19,7 @@ A Guild Wars 2 addon for WvW squads with a set revive tool order. It watches eve
 skills and shows whose turn it is, so two people don't burn an Illu and Spirit on the
 same downed player.
 
-**[Discord server](https://discord.gg/fufbGGGuXv)** for questions, bug reports and new versions. DM **exoqqen**
+**DM **exoqqen**
 for questions.
 
 ![What it does](docs/images/banner.gif)
