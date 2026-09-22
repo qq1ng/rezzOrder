@@ -5,7 +5,7 @@
 > **This addon is no longer developed, and I no longer recommend running it.**
 >
 > Rezz Order worked out whose revive skill was ready by adding up cast events from ArcDPS. In its
-> 20.09.2026 build, ArcDPS stopped giving addons that data
+> 20.09.2026 build, ArcDPS stopped giving addons that data.
 >
 >> Since the 20.09.2026 ArcDPS build, the turn tracking no longer works at all, and I am not going to
 > rebuild it another way. The older releases below stay downloadable so nothing breaks unannounced, but
@@ -19,7 +19,7 @@ A Guild Wars 2 addon for WvW squads with a set revive tool order. It watches eve
 skills and shows whose turn it is, so two people don't burn an Illu and Spirit on the
 same downed player.
 
-**DM **exoqqen**
+DM **exoqqen**
 for questions.
 
 ![What it does](docs/images/banner.gif)
